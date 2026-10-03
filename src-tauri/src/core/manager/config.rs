@@ -44,6 +44,22 @@ enum ConfigApplication {
 
 pub(crate) struct ConfigUpdateGuard<'a>(&'a CoreManager);
 
+pub(crate) struct AppRouteUpdateGuard<'a> {
+    _config: ConfigUpdateGuard<'a>,
+    _write: tokio::sync::MutexGuard<'static, ()>,
+}
+
+impl AppRouteUpdateGuard<'_> {
+    pub(crate) async fn restore_previous(&self) -> Result<()> {
+        let outcome = self._config.0.perform_config_update(None).await?;
+        if outcome.is_valid() {
+            Ok(())
+        } else {
+            Err(anyhow!("failed to restore previous app routing: {outcome}"))
+        }
+    }
+}
+
 impl Drop for ConfigUpdateGuard<'_> {
     fn drop(&mut self) {
         self.0.finish_config_update();
@@ -247,6 +263,43 @@ impl CoreManager {
         } else {
             Err(anyhow!("{outcome}"))
         }
+    }
+
+    pub(crate) async fn update_config_forced_with_app_routes(
+        &self,
+        profile: std::string::String,
+        policy: clash_verge_network::AppRoutingPolicy,
+    ) -> Result<std::result::Result<AppRouteUpdateGuard<'_>, ValidationOutcome>> {
+        if handle::Handle::global().is_exiting() {
+            return Ok(Err(ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Exiting,
+            }));
+        }
+        let write = Config::lock_config_write().await;
+        if !self.try_start_config_update() {
+            return Ok(Err(ValidationOutcome::Busy));
+        }
+        let guard = AppRouteUpdateGuard {
+            _config: ConfigUpdateGuard(self),
+            _write: write,
+        };
+        self.set_last_update(Instant::now());
+        let outcome = match crate::core::network_app_routes::APP_ROUTE_CANDIDATE
+            .scope((profile, policy), self.perform_config_update(None))
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let rollback = guard.restore_previous().await;
+                return Err(anyhow!(
+                    "app routing update failed: {error:#}; previous app routing restore: {rollback:?}"
+                ));
+            }
+        };
+        if !outcome.is_valid() {
+            return Ok(Err(outcome));
+        }
+        Ok(Ok(guard))
     }
 
     fn should_update_config(&self) -> bool {

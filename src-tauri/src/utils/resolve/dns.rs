@@ -24,6 +24,10 @@ fn restore_dns_state_dir(resource_dir: &Path, state_dir: PathBuf) -> PathBuf {
 }
 
 pub async fn set_public_dns(dns_server: String) {
+    if cfg!(feature = "network-dev") {
+        logging!(warn, Type::Config, "NetworkControl Dev cannot change host DNS settings");
+        return;
+    }
     use crate::{core::handle, utils::dirs};
     use tauri_plugin_shell::ShellExt as _;
     let app_handle = handle::Handle::app_handle();
@@ -73,6 +77,9 @@ pub async fn set_public_dns(dns_server: String) {
 
 #[cfg(target_os = "macos")]
 pub async fn restore_public_dns() {
+    if cfg!(feature = "network-dev") {
+        return;
+    }
     use crate::{core::handle, utils::dirs};
     use tauri_plugin_shell::ShellExt as _;
     let app_handle = handle::Handle::app_handle();

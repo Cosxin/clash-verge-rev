@@ -19,6 +19,7 @@ default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 verge-dev = ["clash-verge-logging/color", "clash_verge_service_ipc/development-channel"]
 dev-sidecar = ["verge-dev"]
+network-dev = ["verge-dev", "dev-sidecar"]
 tauri-dev = ["dep:tauri-plugin-devtools"]
 tokio-trace = ["clash-verge-logging/tokio-trace"]
 chrome-trace = ["clash-verge-logging/chrome-trace"]
@@ -38,6 +39,7 @@ clash-verge-logging = { workspace = true }
 clash-verge-signal = { workspace = true }
 clash-verge-i18n = { workspace = true }
 clash-verge-limiter = { workspace = true }
+clash-verge-network = { workspace = true }
 tauri-plugin-clash-verge-sysinfo = { workspace = true }
 tauri-plugin-clipboard-manager = { workspace = true }
 tauri = { workspace = true, features = [

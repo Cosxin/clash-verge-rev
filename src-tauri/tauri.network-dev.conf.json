@@ -1,0 +1,23 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "NetworkControl Dev",
+  "mainBinaryName": "network-control-dev",
+  "identifier": "io.github.cosxin.network-control.dev",
+  "bundle": {
+    "publisher": "Cosxin (development build)",
+    "longDescription": "Isolated NetworkControl developer build. Native firewall and per-app routing are not implemented.",
+    "shortDescription": "NetworkControl developer preview",
+    "externalBin": ["sidecar/verge-mihomo"],
+    "resources": ["resources"],
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "signingIdentity": null,
+      "infoPlist": null,
+      "exceptionDomain": null
+    }
+  },
+  "plugins": {
+    "updater": { "pubkey": "", "endpoints": [] },
+    "deep-link": { "desktop": { "schemes": [] } }
+  }
+}

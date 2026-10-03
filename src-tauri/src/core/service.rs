@@ -1858,6 +1858,9 @@ impl ServiceManager {
     }
 
     pub async fn handle_service_status(&self, status: ServiceStatus) -> Result<()> {
+        if cfg!(feature = "network-dev") {
+            bail!("Privileged service changes are disabled in NetworkControl Dev");
+        }
         // Box the large operation future once instead of carrying it in every calling command.
         self.run_operation(Box::pin(self.apply_service_status(status))).await
     }

@@ -4,6 +4,7 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import LanguageOutlinedIcon from '@mui/icons-material/LanguageOutlined'
 import LockOpenOutlinedIcon from '@mui/icons-material/LockOpenOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import ShieldOutlinedIcon from '@mui/icons-material/ShieldOutlined'
 import SubjectOutlinedIcon from '@mui/icons-material/SubjectOutlined'
 import WifiOutlinedIcon from '@mui/icons-material/WifiOutlined'
 import { type ComponentType, type ReactNode } from 'react'
@@ -21,6 +22,7 @@ import { navigationItems } from './_navigation-meta'
 import ConnectionsPage from './connections'
 import HomePage from './home'
 import LogsPage from './logs'
+import NetworkPage from './network'
 import ProfilePage from './profiles'
 import ProxyPage from './proxies'
 import RulesPage from './rules'
@@ -59,6 +61,11 @@ export const navItems: NavigationItem[] = [
     ...navigationItems.rules,
     icon: [<ForkRightOutlinedIcon key="mui" />, <RulesSvg key="svg" />],
     Component: RulesPage,
+  },
+  {
+    ...navigationItems.network,
+    icon: [<ShieldOutlinedIcon key="mui" />, <ShieldOutlinedIcon key="svg" />],
+    Component: NetworkPage,
   },
   {
     ...navigationItems.logs,

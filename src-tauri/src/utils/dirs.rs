@@ -8,15 +8,20 @@ use std::{
 };
 use tauri::Manager as _;
 
-#[cfg(not(feature = "verge-dev"))]
+#[cfg(all(not(feature = "verge-dev"), not(feature = "network-dev")))]
 pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev";
-#[cfg(not(feature = "verge-dev"))]
+#[cfg(all(not(feature = "verge-dev"), not(feature = "network-dev")))]
 pub static BACKUP_DIR: &str = "clash-verge-rev-backup";
 
-#[cfg(feature = "verge-dev")]
+#[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
 pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev.dev";
-#[cfg(feature = "verge-dev")]
+#[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
 pub static BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
+
+#[cfg(feature = "network-dev")]
+pub static APP_ID: &str = "io.github.cosxin.network-control.dev";
+#[cfg(feature = "network-dev")]
+pub static BACKUP_DIR: &str = "network-control-backup-dev";
 
 pub static CLASH_CONFIG: &str = "config.yaml";
 pub static VERGE_CONFIG: &str = "verge.yaml";
@@ -219,8 +224,10 @@ fn sidecar_ipc_path_for(
 
     let root = std::ffi::CStr::from_bytes_until_nul(&buffer)
         .map_err(|_| anyhow::anyhow!("macOS per-user temporary directory is not NUL-terminated"))?;
-    #[cfg(feature = "verge-dev")]
+    #[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
     let filename = "verge-mihomo-dev.sock";
+    #[cfg(feature = "network-dev")]
+    let filename = "network-mihomo-dev.sock";
     #[cfg(not(feature = "verge-dev"))]
     let filename = "verge-mihomo.sock";
     let path = PathBuf::from(OsStr::from_bytes(root.to_bytes())).join(filename);
@@ -244,8 +251,13 @@ fn sidecar_ipc_path_for(_app_root: &std::path::Path, identity: &clash_verge_serv
 #[cfg(any(windows, test))]
 fn sidecar_pipe_name(identity: &clash_verge_service_ipc::OwnerIdentity, is_dev: bool) -> String {
     let flavor = if is_dev { "dev" } else { "release" };
+    let product = if cfg!(feature = "network-dev") {
+        "network-control"
+    } else {
+        "verge-mihomo"
+    };
     format!(
-        r"\\.\pipe\verge-mihomo-sidecar-{flavor}-{}",
+        r"\\.\pipe\{product}-sidecar-{flavor}-{}",
         clash_verge_service_ipc::owner_key(identity)
     )
 }
@@ -285,8 +297,10 @@ mod ipc_tests {
 
         assert!(!path.starts_with(app_root));
         assert!(path.as_os_str().as_bytes().len() < 104);
-        #[cfg(feature = "verge-dev")]
+        #[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
         assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo-dev.sock")));
+        #[cfg(feature = "network-dev")]
+        assert_eq!(path.file_name(), Some(OsStr::new("network-mihomo-dev.sock")));
         #[cfg(not(feature = "verge-dev"))]
         assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo.sock")));
         assert_eq!(path, sidecar_ipc_path_for(Path::new("/different/root"), &identity)?);
@@ -311,7 +325,12 @@ mod ipc_tests {
         assert_eq!(
             path,
             Path::new(&format!(
-                r"\\.\pipe\verge-mihomo-sidecar-{}-{}",
+                r"\\.\pipe\{}-sidecar-{}-{}",
+                if cfg!(feature = "network-dev") {
+                    "network-control"
+                } else {
+                    "verge-mihomo"
+                },
                 if cfg!(feature = "verge-dev") { "dev" } else { "release" },
                 clash_verge_service_ipc::owner_key(&identity)
             ))
@@ -346,14 +365,34 @@ mod windows_pipe_name_tests {
             sid: "S-1-5-21-1000".to_owned(),
         };
         let owner_key = clash_verge_service_ipc::owner_key(&identity);
+        let product = if cfg!(feature = "network-dev") {
+            "network-control"
+        } else {
+            "verge-mihomo"
+        };
 
         assert_eq!(
             sidecar_pipe_name(&identity, false),
-            format!(r"\\.\pipe\verge-mihomo-sidecar-release-{owner_key}")
+            format!(r"\\.\pipe\{product}-sidecar-release-{owner_key}")
         );
         assert_eq!(
             sidecar_pipe_name(&identity, true),
-            format!(r"\\.\pipe\verge-mihomo-sidecar-dev-{owner_key}")
+            format!(r"\\.\pipe\{product}-sidecar-dev-{owner_key}")
         );
+    }
+
+    #[cfg(feature = "network-dev")]
+    #[test]
+    fn network_development_identity_matches_the_isolated_bundle() -> anyhow::Result<()> {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.network-dev.conf.json"))?;
+        assert_eq!(config["identifier"], super::APP_ID);
+        assert_ne!(super::APP_ID, "io.github.clash-verge-rev.clash-verge-rev.dev");
+        assert_eq!(crate::config::IVerge::VALID_CLASH_CORES, &["verge-mihomo"]);
+        assert_eq!(config["plugins"]["updater"]["endpoints"], serde_json::json!([]));
+        assert_eq!(
+            config["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!([])
+        );
+        Ok(())
     }
 }

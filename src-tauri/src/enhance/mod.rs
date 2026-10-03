@@ -129,7 +129,7 @@ async fn get_config_values(profile_uid: &str) -> ConfigValues {
 
     let (clash_core, enable_tun, enable_builtin, socks_enabled, http_enabled, enable_dns_settings) = (
         Some(verge_arc.get_valid_clash_core()),
-        enable_tun_mode.unwrap_or(false),
+        enable_tun_mode.unwrap_or(false) && !cfg!(feature = "network-dev"),
         enable_builtin_enhanced.unwrap_or(true),
         verge_socks_enabled.unwrap_or(false),
         verge_http_enabled.unwrap_or(false),
@@ -964,6 +964,7 @@ pub async fn enhance(
     let config = ensure_lan_bind_address(config);
 
     let config = cleanup_proxy_groups(config);
+    let config = crate::core::network_app_routes::enhance(config, profile_uid).await?;
     let config = use_sort(config);
 
     let mut exists_keys_set = HashSet::new();

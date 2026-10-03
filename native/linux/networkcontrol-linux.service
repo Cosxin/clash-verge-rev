@@ -1,0 +1,27 @@
+[Unit]
+Description=NetworkControl Linux native application-ban adapter
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/etc/networkcontrol/linux.env
+ExecStart=/usr/libexec/networkcontrol-linux --serve --owner-uid ${NETWORKCONTROL_OWNER_UID} --owner-gid ${NETWORKCONTROL_OWNER_GID}
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/run/networkcontrol /var/lib/networkcontrol
+RuntimeDirectory=networkcontrol
+RuntimeDirectoryMode=0750
+StateDirectory=networkcontrol
+StateDirectoryMode=0700
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_READ_SEARCH CAP_SYS_PTRACE CAP_CHOWN
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

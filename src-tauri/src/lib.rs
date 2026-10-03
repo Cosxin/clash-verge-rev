@@ -137,6 +137,22 @@ mod app_init {
             cmd::open_logs_dir,
             cmd::open_core_dir,
             cmd::get_network_interfaces,
+            cmd::get_network_workspace,
+            cmd::get_native_firewall_status,
+            cmd::set_native_app_ban,
+            cmd::get_network_app_routes,
+            cmd::save_network_app_routes,
+            cmd::apply_network_app_routes,
+            cmd::resolve_network_app_route_path,
+            cmd::save_network_policy,
+            cmd::preview_network_policy,
+            cmd::set_network_history_enabled,
+            cmd::set_network_history_limits,
+            cmd::get_network_history,
+            cmd::clear_network_history,
+            cmd::export_network_history,
+            cmd::import_network_lsrules,
+            cmd::export_network_lsrules,
             cmd::get_system_hostname,
             cmd::restart_app,
             cmd::restart_core,
@@ -298,6 +314,8 @@ pub fn run() -> std::process::ExitCode {
                     logging!(error, Type::Setup, "Failed to init work dir/logger: {e:#}");
                 }
 
+                core::network_workspace::start();
+
                 logging!(debug, Type::Setup, "开始应用初始化...");
                 if let Err(e) = app_init::setup_autostart(app) {
                     logging!(error, Type::Setup, "Failed to setup autostart: {}", e);
@@ -356,7 +374,7 @@ pub fn run() -> std::process::ExitCode {
 
             #[cfg(target_os = "macos")]
             if let Some(window) = _app_handle.get_webview_window("main") {
-                let _ = window.set_title("Clash Verge");
+                let _ = window.set_title(_app_handle.config().product_name.as_deref().unwrap_or("Clash Verge"));
             }
         }
 

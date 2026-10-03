@@ -12,6 +12,7 @@ use tokio::sync::MutexGuard;
 
 /// Patch Clash configuration
 pub async fn patch_clash(patch: &Mapping) -> Result<()> {
+    let _config_write = Config::lock_config_write().await;
     Config::clash().await.edit_draft(|d| d.patch_config(patch));
 
     let res = {
@@ -300,6 +301,13 @@ pub(super) async fn apply_verge_patch_locked(
     patch: &IVerge,
     not_save_file: bool,
 ) -> Result<()> {
+    anyhow::ensure!(
+        !cfg!(feature = "network-dev")
+            || (patch.enable_tun_mode != Some(true)
+                && patch.enable_system_proxy != Some(true)
+                && patch.enable_auto_launch != Some(true)),
+        "System proxy, TUN and autostart activation are disabled in NetworkControl Dev"
+    );
     let verge = Config::verge().await;
     // Hold the claim across side effects so concurrent transactions cannot share this draft.
     let transaction = DraftTransaction::begin(vec![&verge])?;

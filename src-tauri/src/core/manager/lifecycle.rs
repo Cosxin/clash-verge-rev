@@ -516,6 +516,9 @@ impl CoreManager {
 
     #[tracing::instrument(skip_all, level = "info", fields(mode = ?*self.get_running_mode(), readiness_generation = self.current_core_readiness_generation(), owner_generation = crate::core::service::owner_monitor_generation()))]
     pub(crate) async fn apply_proxy_after_start(&self) -> Result<()> {
+        if cfg!(feature = "network-dev") {
+            return Ok(());
+        }
         let expectation = ProxyRestoreExpectation::capture(
             *self.get_running_mode(),
             self.current_core_readiness_generation(),

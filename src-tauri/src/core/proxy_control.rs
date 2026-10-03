@@ -33,14 +33,19 @@ const CLEAR_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// Classification remains downcastable while the original error stays available for diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SysproxyFailure {
+    DevelopmentIsolation,
     /// A local `networksetup` write lacked privileges.
     PrivilegeRequired,
     /// The service failed to apply the proxy and attempted direct fallback.
-    DirectFallback { detail: String },
+    DirectFallback {
+        detail: String,
+    },
     /// A ready service can replace the refused sidecar write.
     SidecarWhileServiceReady,
     /// The proxy guard stopped after repeated failures.
-    GuardStopped { detail: String },
+    GuardStopped {
+        detail: String,
+    },
     /// The Core was not ready, so enabling the system proxy was refused.
     CoreNotReady,
     /// A Windows system call refused the write, usually a transient RPC hiccup.
@@ -51,6 +56,7 @@ impl SysproxyFailure {
     #[inline]
     pub const fn code(&self) -> &'static str {
         match self {
+            Self::DevelopmentIsolation => "NETWORK_DEV_HOST_MUTATION_DISABLED",
             Self::PrivilegeRequired => "SYSPROXY_PRIVILEGE_REQUIRED",
             Self::DirectFallback { .. } => "SYSPROXY_DIRECT_FALLBACK",
             Self::SidecarWhileServiceReady => "SYSPROXY_SIDECAR_WHILE_SERVICE_READY",
@@ -69,6 +75,9 @@ impl SysproxyFailure {
 impl std::fmt::Display for SysproxyFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::DevelopmentIsolation => {
+                f.write_str("NetworkControl Dev cannot change the host system proxy or PAC settings")
+            }
             Self::PrivilegeRequired => f.write_str("system proxy write requires elevated privileges"),
             Self::DirectFallback { detail } => {
                 write!(f, "system proxy failed and fell back to direct: {detail}")
@@ -86,6 +95,13 @@ impl std::fmt::Display for SysproxyFailure {
 }
 
 impl std::error::Error for SysproxyFailure {}
+
+pub(super) fn ensure_host_proxy_mutation_allowed() -> Result<()> {
+    if cfg!(feature = "network-dev") {
+        return Err(SysproxyFailure::DevelopmentIsolation.into());
+    }
+    Ok(())
+}
 
 /// Marker for a partially applied system proxy write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -472,6 +488,7 @@ fn table_effect(result: &Result<()>) -> TableEffect<'_> {
 
 #[tracing::instrument(skip_all, level = "info", fields(route = tracing::field::Empty))]
 pub async fn apply() -> Result<()> {
+    ensure_host_proxy_mutation_allowed()?;
     let running_mode = CoreManager::global().get_running_mode();
     let verge = Config::verge().await.latest_arc();
     let route = proxy_backend_route(cfg!(target_os = "macos"), &running_mode);
@@ -508,6 +525,9 @@ pub async fn apply() -> Result<()> {
 }
 
 pub async fn clear() -> Result<()> {
+    if cfg!(feature = "network-dev") {
+        return Ok(());
+    }
     let result = clear_with_retry().await;
     // Clear failures must be filed even when a restart aborts before apply.
     settle_table(
@@ -564,6 +584,7 @@ async fn clear_inner() -> Result<()> {
 }
 
 pub async fn refresh_guard() -> Result<()> {
+    ensure_host_proxy_mutation_allowed()?;
     let (generation, _drained) = SERVICE_PROXY_OPERATIONS
         .cancel_and_drain(|| Sysopt::global().stop_proxy_guard())
         .await;
@@ -671,6 +692,34 @@ mod tests {
     };
     use std::task::Poll;
     use tokio::sync::Barrier;
+
+    #[cfg(feature = "network-dev")]
+    #[tokio::test]
+    async fn network_dev_refuses_proxy_mutation_and_skips_host_cleanup() -> anyhow::Result<()> {
+        for result in [
+            super::apply().await,
+            super::refresh_guard().await,
+            super::Sysopt::global().update_sysproxy().await,
+        ] {
+            assert_eq!(
+                result
+                    .as_ref()
+                    .err()
+                    .and_then(super::SysproxyFailure::from_chain)
+                    .map(super::SysproxyFailure::code),
+                Some("NETWORK_DEV_HOST_MUTATION_DISABLED")
+            );
+        }
+        super::clear().await?;
+        super::Sysopt::global().reset_sysproxy().await?;
+        crate::core::autostart::update_launch().await?;
+        #[cfg(target_os = "macos")]
+        {
+            crate::utils::resolve::dns::restore_public_dns().await;
+            crate::utils::resolve::dns::set_public_dns("192.0.2.1".to_owned()).await;
+        }
+        Ok(())
+    }
 
     fn guarded_proxy() -> MacosProxyConfig {
         MacosProxyConfig::Global {

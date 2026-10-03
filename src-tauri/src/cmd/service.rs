@@ -19,6 +19,12 @@ pub enum ServiceInstallOutcome {
 }
 
 async fn execute_service_operation_sync(status: ServiceStatus, error_code: &str) -> CmdResult<ServiceInstallOutcome> {
+    if cfg!(feature = "network-dev") {
+        return Err(super::coded_error(
+            "NETWORK_DEV_ISOLATION",
+            "Privileged service changes are disabled in NetworkControl Dev",
+        ));
+    }
     let manager = CoreManager::global();
     let result = {
         let _lifecycle = manager.lifecycle_lock.lock().await;
@@ -88,6 +94,12 @@ pub async fn install_service() -> CmdResult<ServiceInstallOutcome> {
 
 #[tauri::command]
 pub async fn uninstall_service() -> CmdResult {
+    if cfg!(feature = "network-dev") {
+        return Err(super::coded_error(
+            "NETWORK_DEV_ISOLATION",
+            "Privileged service changes are disabled in NetworkControl Dev",
+        ));
+    }
     CoreManager::global()
         .uninstall_service_and_start_sidecar()
         .await
@@ -147,6 +159,29 @@ mod tests {
         CoreAvailability, CoreInspection, InstallationStatus, ProtocolInfo, management::InstallationVerificationError,
     };
     use std::cell::Cell;
+
+    #[cfg(feature = "network-dev")]
+    #[tokio::test]
+    async fn network_dev_service_changes_reject_before_manager_initialization() {
+        for result in [
+            super::install_service().await,
+            super::reinstall_service().await,
+            super::repair_service().await,
+        ] {
+            assert_eq!(
+                result.expect_err("service mutation must be rejected").code.as_deref(),
+                Some("NETWORK_DEV_ISOLATION")
+            );
+        }
+        assert_eq!(
+            super::uninstall_service()
+                .await
+                .expect_err("uninstall must be rejected")
+                .code
+                .as_deref(),
+            Some("NETWORK_DEV_ISOLATION")
+        );
+    }
 
     #[tokio::test]
     async fn rejected_installation_reports_sidecar_only_after_successful_continuation() {

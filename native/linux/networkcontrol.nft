@@ -1,0 +1,6 @@
+# Explicit opt-in installation only. Never flush the host ruleset.
+add table inet networkcontrol { comment "networkcontrol-v1"; }
+add chain inet networkcontrol output { type filter hook output priority 0; policy accept; }
+add chain inet networkcontrol input { type filter hook input priority 0; policy accept; }
+add rule inet networkcontrol output meta l4proto { tcp, udp } queue num 9100
+add rule inet networkcontrol input meta l4proto { tcp, udp } queue num 9101

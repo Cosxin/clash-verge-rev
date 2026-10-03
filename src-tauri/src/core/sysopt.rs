@@ -192,6 +192,7 @@ fn skip_without_network_service(enabling: bool, outcome: sysproxy::Result<()>) -
 
 /// Force both proxy kinds off, in one blocking hop.
 async fn disable_all_proxies(sys: Sysproxy, auto: Autoproxy) -> Result<()> {
+    proxy_control::ensure_host_proxy_mutation_allowed()?;
     tokio::task::spawn_blocking(move || {
         disable_both(
             || skip_without_network_service(sys.enable, sys.set_system_proxy()).map(|_reached_os| ()),
@@ -324,6 +325,9 @@ impl Sysopt {
 
     /// Reconcile guard state with configuration and report success.
     pub(super) async fn refresh_guard(&self) -> bool {
+        if cfg!(feature = "network-dev") {
+            return true;
+        }
         logging!(info, Type::Core, "Refreshing system proxy guard...");
         let verge = Config::verge().await.latest_arc();
         let _operation = self.guard_operation_lock.lock().await;
@@ -414,6 +418,7 @@ impl Sysopt {
 
     /// init the sysproxy
     pub(super) async fn update_sysproxy(&self) -> Result<()> {
+        proxy_control::ensure_host_proxy_mutation_allowed()?;
         let _lock = self.update_lock.lock().await;
         let verge = Config::verge().await.latest_arc();
         // Configured, not live: this runs while the Core is being started or restarted, and
@@ -529,6 +534,9 @@ impl Sysopt {
 
     /// reset the sysproxy
     pub(super) async fn reset_sysproxy(&self) -> Result<()> {
+        if cfg!(feature = "network-dev") {
+            return Ok(());
+        }
         if self
             .reset_sysproxy
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

@@ -1096,6 +1096,7 @@ dependencies = [
  "clash-verge-limiter",
  "clash-verge-logging",
  "clash-verge-media-unlock",
+ "clash-verge-network",
  "clash-verge-signal",
  "clash_verge_service_ipc",
  "criterion",
@@ -1210,6 +1211,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "clash-verge-network"
+version = "0.1.0"
+dependencies = [
+ "ls_rules",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4046,6 +4056,15 @@ name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
+
+[[package]]
+name = "ls_rules"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c553486621af805f6b19690d6e287c89d4e423a541fe62bb83b2cb84c1131201"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "lzma-rust2"
