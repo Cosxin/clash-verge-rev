@@ -31,8 +31,10 @@ export const saveNetworkAppRoutes = (
 export const applyNetworkAppRoutes = (
   expectedGeneration: number,
   expectedProfileUid: string,
+  expectedApplyMode: 'live' | 'setup',
 ) =>
   invoke<AppRoutingWorkspace>('apply_network_app_routes', {
     expectedGeneration,
     expectedProfileUid,
+    expectedApplyMode,
   })

@@ -1,5 +1,9 @@
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded'
 import RefreshRounded from '@mui/icons-material/RefreshRounded'
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Chip,
@@ -9,11 +13,13 @@ import {
   Tab,
   Tabs,
   Tooltip,
+  Typography,
 } from '@mui/material'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BasePage } from '@/components/base'
+import { NetworkAppBans } from '@/components/network/network-app-bans'
 import { NetworkAppRoutes } from '@/components/network/network-app-routes'
 import { NetworkHistory } from '@/components/network/network-history'
 import { NetworkOverview } from '@/components/network/network-overview'
@@ -26,9 +32,7 @@ import { revalidateQuery, useQuery } from '@/services/query-client'
 const NetworkPage = () => {
   const { t } = useTranslation()
   const visible = useVisibility()
-  const [tab, setTab] = useState<
-    'overview' | 'routes' | 'policies' | 'history'
-  >('overview')
+  const [tab, setTab] = useState<'apps' | 'traffic' | 'settings'>('apps')
   const {
     data: workspace,
     error,
@@ -70,9 +74,10 @@ const NetworkPage = () => {
       }
     >
       <Stack spacing={2} sx={{ p: 2 }}>
-        <Alert severity="warning" title={t('network.status.observeTitle')}>
-          {t('network.status.observeDescription')}
-        </Alert>
+        <Typography variant="body2" color="text.secondary">
+          Routes affect traffic entering Mihomo. App blocking needs an active
+          native filter.
+        </Typography>
         {error && (
           <Alert severity="error">
             {t('network.status.loadingFailed')}: {errorDetail(error)}
@@ -93,75 +98,79 @@ const NetworkPage = () => {
               value={tab}
               onChange={(_, value) => setTab(value)}
               variant="scrollable"
+              aria-label="Network controls"
             >
               <Tab
-                value="overview"
-                label={t('network.tabs.overview')}
-                id="network-tab-overview"
-                aria-controls="network-panel-overview"
+                value="apps"
+                label="Apps"
+                id="network-tab-apps"
+                aria-controls="network-panel-apps"
               />
               <Tab
-                value="policies"
-                label={t('network.tabs.policies')}
-                id="network-tab-policies"
-                aria-controls="network-panel-policies"
+                value="traffic"
+                label="Traffic"
+                id="network-tab-traffic"
+                aria-controls="network-panel-traffic"
               />
               <Tab
-                value="routes"
-                label="App routing"
-                id="network-tab-routes"
-                aria-controls="network-panel-routes"
-              />
-              <Tab
-                value="history"
-                label={t('network.tabs.history')}
-                id="network-tab-history"
-                aria-controls="network-panel-history"
+                value="settings"
+                label="Settings"
+                id="network-tab-settings"
+                aria-controls="network-panel-settings"
               />
             </Tabs>
             <Box
               role="tabpanel"
-              id="network-panel-overview"
-              aria-labelledby="network-tab-overview"
-              hidden={tab !== 'overview'}
+              id="network-panel-apps"
+              aria-labelledby="network-tab-apps"
+              hidden={tab !== 'apps'}
             >
-              <NetworkOverview
-                key={`${workspace.retentionDays}:${workspace.maxRecords}`}
-                workspace={workspace}
-                onChanged={refresh}
-              />
+              <Stack spacing={2}>
+                <NetworkAppRoutes enabled={visible && tab === 'apps'} />
+                <NetworkAppBans />
+              </Stack>
             </Box>
             <Box
               role="tabpanel"
-              id="network-panel-policies"
-              aria-labelledby="network-tab-policies"
-              hidden={tab !== 'policies'}
-            >
-              <NetworkPolicyEditor
-                policy={workspace.policy}
-                writable={workspace.storageWritable}
-                onChanged={refresh}
-              />
-            </Box>
-            <Box
-              role="tabpanel"
-              id="network-panel-routes"
-              aria-labelledby="network-tab-routes"
-              hidden={tab !== 'routes'}
-            >
-              <NetworkAppRoutes enabled={visible && tab === 'routes'} />
-            </Box>
-            <Box
-              role="tabpanel"
-              id="network-panel-history"
-              aria-labelledby="network-tab-history"
-              hidden={tab !== 'history'}
+              id="network-panel-traffic"
+              aria-labelledby="network-tab-traffic"
+              hidden={tab !== 'traffic'}
             >
               <NetworkHistory
                 workspace={workspace}
-                enabled={visible && tab === 'history'}
+                enabled={visible && tab === 'traffic'}
                 onChanged={refresh}
               />
+            </Box>
+            <Box
+              role="tabpanel"
+              id="network-panel-settings"
+              aria-labelledby="network-tab-settings"
+              hidden={tab !== 'settings'}
+            >
+              <Stack spacing={2}>
+                <NetworkOverview
+                  key={`${workspace.retentionDays}:${workspace.maxRecords}`}
+                  workspace={workspace}
+                  onChanged={refresh}
+                />
+                <Accordion slotProps={{ transition: { unmountOnExit: false } }}>
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreRounded />}
+                    id="network-advanced-policies-header"
+                    aria-controls="network-advanced-policies-content"
+                  >
+                    <Typography>Advanced draft policies</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <NetworkPolicyEditor
+                      policy={workspace.policy}
+                      writable={workspace.storageWritable}
+                      onChanged={refresh}
+                    />
+                  </AccordionDetails>
+                </Accordion>
+              </Stack>
             </Box>
           </>
         )}

@@ -18,7 +18,6 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { BaseDialog } from '@/components/base'
-import { NetworkAppBans } from '@/components/network/network-app-bans'
 import {
   setNetworkHistoryEnabled,
   setNetworkHistoryLimits,
@@ -105,7 +104,6 @@ export const NetworkOverview = ({ workspace, onChanged }: Props) => {
 
   return (
     <Stack spacing={2}>
-      <NetworkAppBans />
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
           {t('network.capabilities.title')}

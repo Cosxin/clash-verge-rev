@@ -2,7 +2,7 @@ use crate::{
     config::Config,
     core::{CoreManager, handle::Handle, network_workspace},
 };
-use clash_verge_network::AppRoutingPolicy;
+use clash_verge_network::{APP_ROUTE_DEFAULT_SLOT, APP_ROUTE_SLOT_PREFIX, AppRoutingPolicy, app_route_slot};
 use serde::Serialize;
 use serde_yaml_ng::{Mapping, Value};
 use std::{
@@ -10,6 +10,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+use tauri_plugin_mihomo::models::{Proxies, Rules};
 use tokio::sync::Mutex;
 
 static APPLY_LOCK: Mutex<()> = Mutex::const_new(());
@@ -25,7 +26,7 @@ fn candidate_for(profile_uid: &str) -> Option<AppRoutingPolicy> {
         .flatten()
 }
 
-fn configured_routes(config: &Mapping) -> BTreeSet<String> {
+fn configured_names(config: &Mapping) -> BTreeSet<String> {
     ["proxies", "proxy-groups"]
         .into_iter()
         .flat_map(|key| {
@@ -36,6 +37,181 @@ fn configured_routes(config: &Mapping) -> BTreeSet<String> {
                 .flatten()
                 .filter_map(|item| item.get("name").and_then(Value::as_str).map(str::to_owned))
         })
+        .chain(std::iter::once("DIRECT".to_owned()))
+        .collect()
+}
+
+fn configured_routes(config: &Mapping) -> BTreeSet<String> {
+    ["proxies", "proxy-groups"]
+        .into_iter()
+        .flat_map(|key| {
+            config
+                .get(key)
+                .and_then(Value::as_sequence)
+                .into_iter()
+                .flatten()
+                .filter(|item| {
+                    !matches!(
+                        item.get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_lowercase()
+                            .as_str(),
+                        "reject" | "reject-drop" | "pass" | "pass-rule" | "dns" | "compatible"
+                    )
+                })
+                .filter_map(|item| item.get("name").and_then(Value::as_str).map(str::to_owned))
+        })
+        .filter(|name| !name.starts_with(APP_ROUTE_SLOT_PREFIX) && name != "GLOBAL")
+        .chain(std::iter::once("DIRECT".to_owned()))
+        .collect()
+}
+
+fn prefix_matches(expected: &[String], rules: &Rules) -> bool {
+    rules.rules.len() >= expected.len()
+        && expected.iter().zip(&rules.rules).all(|(expected, actual)| {
+            if actual
+                .extra
+                .get("extra")
+                .and_then(|value| value.get("disabled"))
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                return false;
+            }
+            let fields = expected.split(',').collect::<Vec<_>>();
+            if fields[0] == "MATCH" {
+                actual.rule_type.as_str() == "Match" && actual.proxy == fields[1]
+            } else {
+                actual.rule_type.as_str() == "ProcessPath" && actual.payload == fields[1] && actual.proxy == fields[2]
+            }
+        })
+}
+
+fn slot_choices(
+    policy: &AppRoutingPolicy,
+    available: &BTreeSet<String>,
+    proxies: &Proxies,
+) -> Result<BTreeMap<String, String>, String> {
+    policy
+        .managed_groups(available)?
+        .into_iter()
+        .map(|slot| {
+            let proxy = proxies
+                .proxies
+                .get(&slot.name)
+                .ok_or_else(|| format!("Managed selector {} is missing; setup is required", slot.name))?;
+            let children = proxy.all.as_ref().ok_or("Managed route is not a selector")?;
+            let selected = proxy.now.as_ref().ok_or("Managed selector has no selected route")?;
+            let expected = slot.children.iter().collect::<BTreeSet<_>>();
+            if proxy.proxy_type.as_str() != "Selector"
+                || children.len() != expected.len()
+                || children.iter().collect::<BTreeSet<_>>() != expected
+                || !children.contains(selected)
+            {
+                return Err(format!(
+                    "Managed selector {} does not match the configured routing slots",
+                    slot.name
+                ));
+            }
+            Ok((slot.name, selected.clone()))
+        })
+        .collect()
+}
+
+fn desired_choices(
+    policy: &AppRoutingPolicy,
+    available: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, String> {
+    Ok(policy
+        .managed_groups(available)?
+        .into_iter()
+        .map(|slot| (slot.name, slot.selected))
+        .collect())
+}
+
+struct RouteActivity {
+    applied: bool,
+    apply_mode: &'static str,
+    live: BTreeMap<String, String>,
+    default: Option<String>,
+}
+
+fn route_activity(
+    active: &AppRoutingPolicy,
+    policy: &AppRoutingPolicy,
+    slots: bool,
+    available: &BTreeSet<String>,
+    proxies: &Proxies,
+    rules: &Rules,
+    core_ready: bool,
+) -> Result<RouteActivity, String> {
+    let expected = if slots {
+        active.managed_rules()?
+    } else {
+        active.compile(available)?
+    };
+    let prefix_active = core_ready && prefix_matches(&expected, rules);
+    let targets_available = std::iter::once(&policy.default_route)
+        .chain(policy.routes.iter().map(|route| &route.route))
+        .all(|target| available.contains(target));
+    let choices = slots
+        .then(|| slot_choices(active, available, proxies))
+        .transpose()
+        .ok()
+        .flatten();
+    let mut live = BTreeMap::new();
+    let default = if !slots && prefix_active {
+        for (route, compiled) in active.routes.iter().zip(&expected) {
+            if let Some((_, target)) = compiled.rsplit_once(',') {
+                live.insert(route.process_path.clone(), target.to_owned());
+            }
+        }
+        expected
+            .last()
+            .and_then(|compiled| compiled.strip_prefix("MATCH,"))
+            .map(str::to_owned)
+    } else {
+        choices
+            .as_ref()
+            .and_then(|choices| choices.get(APP_ROUTE_DEFAULT_SLOT).cloned())
+    };
+    if let Some(choices) = &choices {
+        for route in &active.routes {
+            if let Some(selected) = choices.get(&app_route_slot(&route.process_path)) {
+                live.insert(route.process_path.clone(), selected.clone());
+            }
+        }
+    }
+    Ok(RouteActivity {
+        applied: active == policy
+            && prefix_active
+            && targets_available
+            && (!slots || choices.as_ref() == Some(&desired_choices(policy, available)?)),
+        apply_mode: if slots && prefix_active && targets_available && active.same_apps(policy) && choices.is_some() {
+            "live"
+        } else {
+            "setup"
+        },
+        live,
+        default,
+    })
+}
+
+fn routes_from_proxies(configured: &BTreeSet<String>, proxies: &Proxies) -> BTreeSet<String> {
+    proxies
+        .proxies
+        .iter()
+        .filter(|(name, proxy)| {
+            configured.contains(*name)
+                && !name.starts_with(APP_ROUTE_SLOT_PREFIX)
+                && name.as_str() != "GLOBAL"
+                && !matches!(
+                    proxy.proxy_type.as_str(),
+                    "Reject" | "RejectDrop" | "Pass" | "PassRule" | "Dns" | "Compatible"
+                )
+        })
+        .map(|(name, _)| name.clone())
         .chain(std::iter::once("DIRECT".to_owned()))
         .collect()
 }
@@ -79,11 +255,14 @@ pub struct AppRoutingWorkspace {
     storage_writable: bool,
     apps: Vec<AppRouteCandidate>,
     route_options: Vec<AppRouteOption>,
+    apply_mode: &'static str,
+    live_route_selections: BTreeMap<String, String>,
+    default_route: Option<String>,
 }
 
 pub async fn enhance(mut config: Mapping, profile_uid: &str) -> anyhow::Result<Mapping> {
-    let policy = if let Some(policy) = candidate_for(profile_uid) {
-        Some(policy)
+    let selected = if let Some(policy) = candidate_for(profile_uid) {
+        Some((policy, true))
     } else {
         let current = network_workspace::state()
             .await
@@ -91,14 +270,45 @@ pub async fn enhance(mut config: Mapping, profile_uid: &str) -> anyhow::Result<M
             .lock()
             .await;
         if current.store.active_app_route_profile.as_deref() == Some(profile_uid) {
-            current.store.active_app_routes.clone()
+            current
+                .store
+                .active_app_routes
+                .clone()
+                .map(|policy| (policy, current.store.active_app_route_slots))
         } else {
             None
         }
     };
-    if let Some(policy) = policy.filter(|policy| policy.enabled) {
+    if let Some((policy, slots)) = selected.filter(|(policy, _)| policy.enabled) {
+        let names = configured_names(&config);
         let available = configured_routes(&config);
-        let prefix = policy.compile(&available).map_err(anyhow::Error::msg)?;
+        let prefix = if slots {
+            if names.iter().any(|name| name.starts_with(APP_ROUTE_SLOT_PREFIX)) {
+                anyhow::bail!("Profile already defines reserved NetworkControl- proxy names; refusing to adopt them");
+            }
+            let groups = policy.managed_groups(&available).map_err(anyhow::Error::msg)?;
+            let mut configured_groups = config
+                .remove("proxy-groups")
+                .and_then(|value| value.as_sequence().cloned())
+                .unwrap_or_default();
+            configured_groups.extend(groups.into_iter().map(|slot| {
+                let mut group = Mapping::new();
+                group.insert("name".into(), slot.name.into());
+                group.insert("type".into(), "select".into());
+                group.insert("hidden".into(), true.into());
+                group.insert("default-selected".into(), slot.selected.into());
+                group.insert(
+                    "proxies".into(),
+                    Value::Sequence(slot.children.into_iter().map(Value::String).collect()),
+                );
+                Value::Mapping(group)
+            }));
+            config.insert("proxy-groups".into(), Value::Sequence(configured_groups));
+            policy.managed_rules()
+        } else {
+            policy.compile(&available)
+        }
+        .map_err(anyhow::Error::msg)?;
         let mut rules: Vec<Value> = prefix.into_iter().map(Value::String).collect();
         rules.extend(
             config
@@ -125,12 +335,13 @@ async fn profile() -> (Option<String>, Option<String>) {
 }
 
 pub async fn view() -> Result<AppRoutingWorkspace, String> {
-    let (policy, active, active_profile, writable, records) = {
+    let (policy, active, active_profile, active_slots, writable, records) = {
         let current = network_workspace::state().await?.lock().await;
         (
             current.store.app_routes.clone(),
             current.store.active_app_routes.clone(),
             current.store.active_app_route_profile.clone(),
+            current.store.active_app_route_slots,
             current.is_writable(),
             current.store.history.records.clone(),
         )
@@ -191,6 +402,9 @@ pub async fn view() -> Result<AppRoutingWorkspace, String> {
     }];
     let (mut core_mode, mut lookup) = (None, None);
     let mut applied = false;
+    let mut apply_mode = "setup";
+    let mut live_route_selections = BTreeMap::new();
+    let mut default_route = None;
     let reason = if let Ok((Ok(proxies), Ok(config), Ok(rules), connections)) = result {
         for app in apps.values_mut() {
             app.active_connections = 0;
@@ -242,21 +456,22 @@ pub async fn view() -> Result<AppRoutingWorkspace, String> {
         options.extend(
             proxies
                 .proxies
-                .into_iter()
+                .iter()
                 .filter(|(name, proxy)| {
-                    configured.contains(name)
-                        && name != "DIRECT"
-                        && name != "GLOBAL"
+                    configured.contains(*name)
+                        && !name.starts_with(APP_ROUTE_SLOT_PREFIX)
+                        && name.as_str() != "DIRECT"
+                        && name.as_str() != "GLOBAL"
                         && !matches!(
                             proxy.proxy_type.as_str(),
                             "Reject" | "RejectDrop" | "Pass" | "PassRule" | "Dns" | "Compatible"
                         )
                 })
                 .map(|(name, proxy)| AppRouteOption {
-                    name,
+                    name: name.clone(),
                     kind: if proxy.all.is_some() { "group" } else { "node" },
                     proxy_type: proxy.proxy_type.as_str().to_owned(),
-                    selected: proxy.now,
+                    selected: proxy.now.clone(),
                     available: true,
                 }),
         );
@@ -269,36 +484,26 @@ pub async fn view() -> Result<AppRoutingWorkspace, String> {
             && std::iter::once(&policy.default_route)
                 .chain(policy.routes.iter().map(|rule| &rule.route))
                 .any(|route| !available.contains(route));
-        if let Some(active) =
-            active.filter(|active| active.enabled && active == &policy && active_profile == profile_uid)
+        if let Some(active) = active
+            .as_ref()
+            .filter(|active| active.enabled && active_profile == profile_uid)
         {
-            let expected = active.compile(&available)?;
-            applied = !missing_route
-                && core_mode.as_deref() == Some("rule")
-                && lookup.as_deref() == Some("always")
-                && rules.rules.len() >= expected.len()
-                && expected.iter().zip(&rules.rules).all(|(expected, actual)| {
-                    if actual
-                        .extra
-                        .get("extra")
-                        .and_then(|value| value.get("disabled"))
-                        .and_then(serde_json::Value::as_bool)
-                        == Some(true)
-                    {
-                        return false;
-                    }
-                    let fields: Vec<_> = expected.split(',').collect();
-                    if fields[0] == "MATCH" {
-                        actual.rule_type.as_str() == "Match" && actual.proxy == fields[1]
-                    } else {
-                        actual.rule_type.as_str() == "ProcessPath"
-                            && actual.payload == fields[1]
-                            && actual.proxy == fields[2]
-                    }
-                });
+            let observation = route_activity(
+                active,
+                &policy,
+                active_slots,
+                &available,
+                &proxies,
+                &rules,
+                core_mode.as_deref() == Some("rule") && lookup.as_deref() == Some("always"),
+            )?;
+            apply_mode = observation.apply_mode;
+            applied = observation.applied;
+            live_route_selections = observation.live;
+            default_route = observation.default;
         }
         if disable_pending { "Disable saved but not applied: previous application routing remains active for this profile. Apply to restore the profile rules." }
-            else if missing_route { "An assigned route disappeared. Previously applied assignments to missing targets are blocked with REJECT, not silently sent direct. Choose a current route and apply again." }
+            else if missing_route { "An assigned route disappeared; its live selection is not confirmed active. Choose a current route and review setup before applying. Missing targets at setup use REJECT, not DIRECT." }
             else if applied { "Applied to new connections entering Mihomo; traffic bypassing the core is not routed. Existing connections are not guaranteed to move." }
             else if core_mode.as_deref() != Some("rule") { "Switch Mihomo to Rule mode before applying; this screen does not change mode, TUN, system proxy or profile." }
             else { "Saved assignments are not confirmed active for this profile. Apply explicitly; process identity is engine-inferred." }.to_owned()
@@ -325,6 +530,9 @@ pub async fn view() -> Result<AppRoutingWorkspace, String> {
         storage_writable: writable,
         apps: apps.into_values().collect(),
         route_options: options,
+        apply_mode,
+        live_route_selections,
+        default_route,
     })
 }
 
@@ -347,7 +555,216 @@ pub async fn save(mut policy: AppRoutingPolicy, expected_generation: u64) -> Res
     view().await
 }
 
-pub async fn apply(expected_generation: u64, expected_profile_uid: String) -> Result<AppRoutingWorkspace, String> {
+async fn current_choices(
+    policy: &AppRoutingPolicy,
+    available: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, String> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let (proxies, config, rules) = tokio::join!(
+            Handle::mihomo().get_proxies(),
+            Handle::mihomo().get_base_config(),
+            Handle::mihomo().get_rules()
+        );
+        let proxies = proxies.map_err(|error| error.to_string())?;
+        let config = config.map_err(|error| error.to_string())?;
+        let rules = rules.map_err(|error| error.to_string())?;
+        if serde_json::to_value(config.mode)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .as_deref()
+            != Some("rule")
+            || serde_json::to_value(config.find_process_mode)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .as_deref()
+                != Some("always")
+            || !prefix_matches(&policy.managed_rules()?, &rules)
+            || routes_from_proxies(available, &proxies) != *available
+        {
+            return Err("Live routing prerequisites changed; no full reload was attempted".to_owned());
+        }
+        slot_choices(policy, available, &proxies)
+    })
+    .await
+    .map_err(|_| "Timed out verifying routing selectors".to_owned())?
+}
+
+async fn select_slot(name: &str, target: &str) -> Result<(), String> {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        Handle::mihomo().select_node_for_group(name, target),
+    )
+    .await
+    .map_err(|_| format!("Timed out selecting route for {name}"))?
+    .map_err(|error| error.to_string())
+}
+
+async fn rollback_choices(changes: &[(String, String, String)]) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (name, previous, attempted) in changes.iter().rev() {
+        let result = async {
+            let proxy = tokio::time::timeout(Duration::from_secs(5), Handle::mihomo().get_proxy_by_name(name))
+                .await
+                .map_err(|_| format!("Timed out inspecting {name} during rollback"))?
+                .map_err(|error| error.to_string())?;
+            if proxy.now.as_deref() == Some(previous) {
+                return Ok(());
+            }
+            if proxy.now.as_deref() != Some(attempted) {
+                return Err(format!(
+                    "{name} changed outside this operation; rollback did not overwrite it"
+                ));
+            }
+            select_slot(name, previous).await?;
+            let proxy = tokio::time::timeout(Duration::from_secs(5), Handle::mihomo().get_proxy_by_name(name))
+                .await
+                .map_err(|_| format!("Timed out confirming rollback of {name}"))?
+                .map_err(|error| error.to_string())?;
+            if proxy.now.as_deref() != Some(previous) {
+                return Err(format!("Rollback selection of {name} was not confirmed"));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(error) = result {
+            errors.push(error);
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
+async fn switch_choices(
+    policy: &AppRoutingPolicy,
+    available: &BTreeSet<String>,
+    mut observed: BTreeMap<String, String>,
+    changes: &mut Vec<(String, String, String)>,
+) -> Result<(), String> {
+    for (name, target) in desired_choices(policy, available)? {
+        let previous = observed.get(&name).ok_or("Managed selector is missing")?.clone();
+        if previous == target {
+            continue;
+        }
+        if current_choices(policy, available).await? != observed {
+            return Err("Routing selectors changed outside this operation; selection was not overwritten".to_owned());
+        }
+        changes.push((name.clone(), previous, target.clone()));
+        select_slot(&name, &target).await?;
+        observed.insert(name, target);
+        if current_choices(policy, available).await? != observed {
+            return Err("Routing selection was not acknowledged or changed outside this operation".to_owned());
+        }
+    }
+    if current_choices(policy, available).await? != desired_choices(policy, available)? {
+        return Err("Routing selections are not confirmed active".to_owned());
+    }
+    Ok(())
+}
+
+pub(crate) async fn confirm_restored_routes() -> Result<(), String> {
+    let profile_uid = profile().await.0;
+    let policy = {
+        let current = network_workspace::state().await?.lock().await;
+        current
+            .store
+            .active_app_routes
+            .as_ref()
+            .filter(|policy| {
+                policy.enabled
+                    && current.store.active_app_route_slots
+                    && current.store.active_app_route_profile == profile_uid
+            })
+            .cloned()
+    };
+    if let Some(policy) = policy {
+        let configured = Config::runtime()
+            .await
+            .data_arc()
+            .config
+            .as_ref()
+            .map(configured_routes)
+            .ok_or("Restored runtime configuration is unavailable")?;
+        let proxies = tokio::time::timeout(Duration::from_secs(5), Handle::mihomo().get_proxies())
+            .await
+            .map_err(|_| "Timed out inspecting restored selector groups")?
+            .map_err(|error| error.to_string())?;
+        let available = routes_from_proxies(&configured, &proxies);
+        let observed = current_choices(&policy, &available).await?;
+        switch_choices(&policy, &available, observed, &mut Vec::new()).await?;
+    }
+    Ok(())
+}
+
+async fn apply_live(
+    workspace: AppRoutingWorkspace,
+    expected_profile_uid: String,
+    available: BTreeSet<String>,
+) -> Result<AppRoutingWorkspace, String> {
+    let guard = {
+        let started = CoreManager::global()
+            .begin_app_route_update()
+            .await
+            .map_err(|error| error.to_string())?;
+        match started {
+            Ok(guard) => guard,
+            Err(outcome) => return Err(format!("Live routing was not committed: {outcome}")),
+        }
+    };
+    let previous = {
+        let current = network_workspace::state().await?.lock().await;
+        current
+            .store
+            .active_app_routes
+            .as_ref()
+            .filter(|previous| {
+                current.store.active_app_route_slots
+                    && current.store.active_app_route_profile.as_deref() == Some(&expected_profile_uid)
+                    && previous.same_apps(&workspace.policy)
+            })
+            .cloned()
+    }
+    .ok_or("Live routing setup changed; review before applying")?;
+    let observed = current_choices(&workspace.policy, &available).await?;
+    if observed != desired_choices(&previous, &available)?
+        && observed != desired_choices(&workspace.policy, &available)?
+    {
+        return Err(
+            "Live routing selections changed outside this operation; refresh and review before applying".to_owned(),
+        );
+    }
+    let mut changes = Vec::new();
+    if let Err(error) = switch_choices(&workspace.policy, &available, observed, &mut changes).await {
+        let rollback = rollback_choices(&changes).await;
+        return Err(format!(
+            "Live routing was not committed: {error}; selection rollback: {rollback:?}"
+        ));
+    }
+    let committed = {
+        let mut current = network_workspace::state().await?.lock().await;
+        let mut next = current.store.clone();
+        next.active_app_routes = Some(workspace.policy);
+        next.active_app_route_profile = Some(expected_profile_uid);
+        next.active_app_route_slots = true;
+        current.commit(next).await
+    };
+    if let Err(error) = committed {
+        let rollback = rollback_choices(&changes).await;
+        return Err(format!(
+            "Live routing persistence failed: {error}; selection rollback: {rollback:?}"
+        ));
+    }
+    drop(guard);
+    view().await
+}
+
+pub async fn apply(
+    expected_generation: u64,
+    expected_profile_uid: String,
+    expected_apply_mode: String,
+) -> Result<AppRoutingWorkspace, String> {
     let _operation = APPLY_LOCK.lock().await;
     let workspace = view().await?;
     if workspace.policy.generation != expected_generation
@@ -357,6 +774,9 @@ pub async fn apply(expected_generation: u64, expected_profile_uid: String) -> Re
     }
     if !workspace.storage_writable || workspace.core_mode.as_deref() != Some("rule") {
         return Err(workspace.reason);
+    }
+    if workspace.apply_mode != expected_apply_mode || !matches!(expected_apply_mode.as_str(), "live" | "setup") {
+        return Err("Routing apply mode changed; review the live-switch or setup warning again".to_owned());
     }
     let available: BTreeSet<_> = workspace
         .route_options
@@ -375,6 +795,9 @@ pub async fn apply(expected_generation: u64, expected_profile_uid: String) -> Re
     if profile().await.0.as_deref() != Some(&expected_profile_uid) {
         return Err("Profile changed while applying routing".to_owned());
     }
+    if expected_apply_mode == "live" {
+        return apply_live(workspace, expected_profile_uid, available).await;
+    }
     let guard = match CoreManager::global()
         .update_config_forced_with_app_routes(expected_profile_uid.clone(), workspace.policy.clone())
         .await
@@ -383,18 +806,35 @@ pub async fn apply(expected_generation: u64, expected_profile_uid: String) -> Re
         Ok(Err(outcome)) => return Err(format!("App routing was not committed: {outcome}")),
         Err(error) => return Err(format!("App routing was not committed: {error}")),
     };
+    let mut changes = Vec::new();
+    if workspace.policy.enabled {
+        let acknowledgement = async {
+            let observed = current_choices(&workspace.policy, &available).await?;
+            switch_choices(&workspace.policy, &available, observed, &mut changes).await
+        }
+        .await;
+        if let Err(error) = acknowledgement {
+            let selections = rollback_choices(&changes).await;
+            let previous = guard.restore_previous().await;
+            return Err(format!(
+                "Routing setup was not committed: {error}; selection rollback: {selections:?}; previous routing restore: {previous:?}"
+            ));
+        }
+    }
     let committed = {
         let mut current = network_workspace::state().await?.lock().await;
         let mut next = current.store.clone();
         next.active_app_routes = Some(workspace.policy);
         next.active_app_route_profile = Some(expected_profile_uid);
+        next.active_app_route_slots = true;
         current.commit(next).await
     };
     if let Err(error) = committed {
+        let selections = rollback_choices(&changes).await;
         let rollback = guard.restore_previous().await;
         drop(guard);
         return Err(format!(
-            "Routing persistence failed: {error}; previous routing restore: {rollback:?}"
+            "Routing persistence failed: {error}; selection rollback: {selections:?}; previous routing restore: {rollback:?}"
         ));
     }
     drop(guard);
@@ -499,7 +939,101 @@ pub async fn resolve_path(path: String) -> Result<AppRouteCandidate, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{APP_ROUTE_CANDIDATE, AppRoutingPolicy, candidate_for};
+    use super::*;
+
+    #[test]
+    fn managed_status_checks_actual_selection_and_complete_enabled_prefix() -> Result<(), String> {
+        let policy = AppRoutingPolicy {
+            enabled: true,
+            default_route: "VPN-A".to_owned(),
+            routes: vec![clash_verge_network::AppRouteRule {
+                process_path: "/usr/bin/curl".to_owned(),
+                route: "DIRECT".to_owned(),
+            }],
+            ..Default::default()
+        };
+        let available = BTreeSet::from(["DIRECT".to_owned(), "VPN-A".to_owned()]);
+        let mut proxies = Proxies::default();
+        for slot in policy.managed_groups(&available)? {
+            proxies.proxies.insert(
+                slot.name.clone(),
+                tauri_plugin_mihomo::models::Proxy {
+                    proxy_type: tauri_plugin_mihomo::models::ProxyType::Selector,
+                    all: Some(slot.children),
+                    now: Some(slot.selected),
+                    name: slot.name,
+                    ..Default::default()
+                },
+            );
+        }
+        let mut rules = Rules::default();
+        for expected in policy.managed_rules()? {
+            let fields = expected.split(',').collect::<Vec<_>>();
+            let is_match = fields[0] == "MATCH";
+            rules.rules.push(tauri_plugin_mihomo::models::Rule {
+                rule_type: if is_match {
+                    tauri_plugin_mihomo::models::RuleType::Match
+                } else {
+                    tauri_plugin_mihomo::models::RuleType::ProcessPath
+                },
+                payload: if is_match { String::new() } else { fields[1].to_owned() },
+                proxy: if is_match { fields[1] } else { fields[2] }.to_owned(),
+                ..Default::default()
+            });
+        }
+        assert!(route_activity(&policy, &policy, true, &available, &proxies, &rules, true)?.applied);
+        proxies
+            .proxies
+            .get_mut(APP_ROUTE_DEFAULT_SLOT)
+            .ok_or("Missing test default")?
+            .now = Some("DIRECT".to_owned());
+        let observation = route_activity(&policy, &policy, true, &available, &proxies, &rules, true)?;
+        assert!(!observation.applied);
+        assert_eq!(observation.default.as_deref(), Some("DIRECT"));
+        assert_eq!(observation.apply_mode, "live");
+        rules.rules[1]
+            .extra
+            .insert("extra".to_owned(), serde_json::json!({"disabled":true}));
+        assert_eq!(
+            route_activity(&policy, &policy, true, &available, &proxies, &rules, true)?.apply_mode,
+            "setup"
+        );
+        proxies
+            .proxies
+            .get_mut(APP_ROUTE_DEFAULT_SLOT)
+            .ok_or("Missing test default")?
+            .all = Some(vec!["DIRECT".to_owned()]);
+        assert!(slot_choices(&policy, &available, &proxies).is_err());
+        let mut legacy: Rules = serde_json::from_value(serde_json::json!({"rules":[
+            {"type":"ProcessPath","payload":"/usr/bin/curl","proxy":"DIRECT"},
+            {"type":"Match","proxy":"VPN-A"}
+        ]}))
+        .map_err(|error| error.to_string())?;
+        let observed = route_activity(&policy, &policy, false, &available, &proxies, &legacy, true)?;
+        assert!(observed.applied);
+        assert_eq!(observed.apply_mode, "setup");
+        assert_eq!(observed.live.get("/usr/bin/curl").map(String::as_str), Some("DIRECT"));
+        assert_eq!(observed.default.as_deref(), Some("VPN-A"));
+        legacy.rules[1].proxy = "REJECT".to_owned();
+        let observed = route_activity(
+            &policy,
+            &policy,
+            false,
+            &BTreeSet::from(["DIRECT".to_owned()]),
+            &proxies,
+            &legacy,
+            true,
+        )?;
+        assert_eq!(observed.default.as_deref(), Some("REJECT"));
+        assert!(!observed.applied);
+        assert_eq!(observed.apply_mode, "setup");
+        assert!(
+            route_activity(&policy, &policy, false, &available, &proxies, &legacy, true)?
+                .default
+                .is_none()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn interleaved_routing_candidates_do_not_leak_into_other_config_generations() {

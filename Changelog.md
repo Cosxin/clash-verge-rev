@@ -29,12 +29,15 @@
 - Add visual application-to-server/group routing and a default route with explicit, profile-bound core application.
 - Add authenticated native ban adapters for macOS, Windows and Linux, with unavailable states until installation and runtime qualification.
 - Preserve native source/destination and process evidence in history; keep overlapping native/core traffic counters separate.
+- Switch existing app/default routes without a full reload and show their live choices.
+- Add JSON agent diagnostics and protected route trials with automatic unconfirmed-trial restoration on macOS/Linux.
 
 </details>
 
 <details>
 <summary><strong> 🚀 优化改进 </strong></summary>
 
+- Simplify Network into Apps, Traffic and Settings, keeping advanced drafts out of the primary workflow.
 
 **🖥️ Windows**
 

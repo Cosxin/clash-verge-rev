@@ -53,7 +53,9 @@ impl AppRouteUpdateGuard<'_> {
     pub(crate) async fn restore_previous(&self) -> Result<()> {
         let outcome = self._config.0.perform_config_update(None).await?;
         if outcome.is_valid() {
-            Ok(())
+            crate::core::network_app_routes::confirm_restored_routes()
+                .await
+                .map_err(anyhow::Error::msg)
         } else {
             Err(anyhow!("failed to restore previous app routing: {outcome}"))
         }
@@ -270,18 +272,10 @@ impl CoreManager {
         profile: std::string::String,
         policy: clash_verge_network::AppRoutingPolicy,
     ) -> Result<std::result::Result<AppRouteUpdateGuard<'_>, ValidationOutcome>> {
-        if handle::Handle::global().is_exiting() {
-            return Ok(Err(ValidationOutcome::Skipped {
-                reason: ValidationSkipReason::Exiting,
-            }));
-        }
-        let write = Config::lock_config_write().await;
-        if !self.try_start_config_update() {
-            return Ok(Err(ValidationOutcome::Busy));
-        }
-        let guard = AppRouteUpdateGuard {
-            _config: ConfigUpdateGuard(self),
-            _write: write,
+        let started = self.begin_app_route_update().await?;
+        let guard = match started {
+            Ok(guard) => guard,
+            Err(outcome) => return Ok(Err(outcome)),
         };
         self.set_last_update(Instant::now());
         let outcome = match crate::core::network_app_routes::APP_ROUTE_CANDIDATE
@@ -300,6 +294,25 @@ impl CoreManager {
             return Ok(Err(outcome));
         }
         Ok(Ok(guard))
+    }
+
+    pub(crate) async fn begin_app_route_update(
+        &self,
+    ) -> Result<std::result::Result<AppRouteUpdateGuard<'_>, ValidationOutcome>> {
+        if handle::Handle::global().is_exiting() {
+            return Ok(Err(ValidationOutcome::Skipped {
+                reason: ValidationSkipReason::Exiting,
+            }));
+        }
+        let write = Config::lock_config_write().await;
+        if !self.try_start_config_update() {
+            return Ok(Err(ValidationOutcome::Busy));
+        }
+        crate::config::profiles::supersede_selected_activation();
+        Ok(Ok(AppRouteUpdateGuard {
+            _config: ConfigUpdateGuard(self),
+            _write: write,
+        }))
     }
 
     fn should_update_config(&self) -> bool {

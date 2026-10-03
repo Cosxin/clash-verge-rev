@@ -81,6 +81,7 @@ const AppRoutesEditor = ({
     profileUid: string
     profileName: string
     enabled: boolean
+    applyMode: 'live' | 'setup'
   } | null>(null)
   const refreshed = refreshAppRoutingDraft(
     draft,
@@ -96,10 +97,25 @@ const AppRoutesEditor = ({
   const missing = missingAppRoutes(policy, workspace)
   const editable = !busy && workspace.storageWritable
   const rowStatus = dirty ? 'Draft' : applied ? 'Applied' : 'Saved only'
-  const candidates = workspace.apps.filter(
-    (app) =>
-      !policy.routes.some((rule) => rule.processPath === app.processPath),
+  const assignedPaths = new Set(policy.routes.map((rule) => rule.processPath))
+  const appsByPath = new Map(
+    workspace.apps.map((app) => [app.processPath, app]),
   )
+  const candidates = workspace.apps.filter(
+    (app) => !assignedPaths.has(app.processPath),
+  )
+  const unassignedActive = candidates.filter((app) => app.activeConnections > 0)
+  const rows = [
+    ...policy.routes.map((rule) => ({ ...rule, override: true })),
+    ...unassignedActive.slice(0, 50).map((app) => ({
+      processPath: app.processPath,
+      route: '',
+      override: false,
+    })),
+  ]
+  const defaultLabel = workspace.defaultRoute
+    ? `Use default (${workspace.defaultRoute})`
+    : 'Use profile rules'
   const update = (patch: Partial<AppRoutingPolicy>) =>
     setDraft((current) => ({
       ...current,
@@ -184,6 +200,7 @@ const AppRoutesEditor = ({
         await applyNetworkAppRoutes(
           applyTarget.generation,
           applyTarget.profileUid,
+          applyTarget.applyMode,
         ),
       )
       setApplyTarget(null)
@@ -201,6 +218,7 @@ const AppRoutesEditor = ({
     value: string,
     onChange: (value: string) => void,
     label: string,
+    includeDefault = false,
   ) => (
     <TextField
       select
@@ -212,12 +230,18 @@ const AppRoutesEditor = ({
       onChange={(event) => onChange(event.target.value)}
       sx={{ minWidth: 210 }}
       error={missing.includes(value)}
+      slotProps={{
+        select: { displayEmpty: includeDefault },
+        inputLabel: { shrink: true },
+      }}
     >
-      {!workspace.routeOptions.some((route) => route.name === value) && (
-        <MenuItem value={value} disabled>
-          {value} · unavailable
-        </MenuItem>
-      )}
+      {includeDefault && <MenuItem value="">{defaultLabel}</MenuItem>}
+      {value &&
+        !workspace.routeOptions.some((route) => route.name === value) && (
+          <MenuItem value={value} disabled>
+            {value} · unavailable
+          </MenuItem>
+        )}
       {workspace.routeOptions.map((route) => (
         <MenuItem
           key={route.name}
@@ -264,10 +288,6 @@ const AppRoutesEditor = ({
               }
             />
           </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Choose a server or proxy/VPN group for each application. Other core
-            traffic uses the default route below.
-          </Typography>
           <Typography variant="caption" color="text.secondary">
             Profile:{' '}
             {workspace.profileName ||
@@ -292,19 +312,10 @@ const AppRoutesEditor = ({
           />
         </Stack>
       </Paper>
-      <Alert severity="info">
-        Mihomo routing only: traffic must enter this core, and application
-        matching depends on the core finding its executable path. This does not
-        capture all system traffic, enable a VPN, or provide a kill switch.
-        Existing connections may keep their previous route.
-      </Alert>
-      {!applied && (
-        <Alert severity="info">
-          Saving or disabling the table does not change live traffic. The core
-          may still use an earlier table until you apply or restore profile
-          routing.
-        </Alert>
-      )}
+      <Typography variant="caption" color="text.secondary">
+        Core traffic only; app identity is engine-inferred. Save stages changes;
+        Apply changes routes for new connections.
+      </Typography>
       {workspace.coreMode !== 'rule' && (
         <Alert severity="warning">
           Applying requires the core to already be in Rule mode. This table will
@@ -316,11 +327,14 @@ const AppRoutesEditor = ({
           The routing store is not writable. Changes cannot be saved or applied.
         </Alert>
       )}
-      {workspace.reason && (
-        <Alert severity={workspace.status === 'error' ? 'error' : 'info'}>
-          {workspace.reason}
-        </Alert>
-      )}
+      {workspace.reason &&
+        (workspace.status === 'error' ? (
+          <Alert severity="error">{workspace.reason}</Alert>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
+            {workspace.reason}
+          </Typography>
+        ))}
       {stale && (
         <Alert severity="warning">
           The saved table changed elsewhere. Your edits are preserved; discard
@@ -434,6 +448,15 @@ const AppRoutesEditor = ({
                   color={applied && !dirty ? 'success' : 'default'}
                   label={rowStatus}
                 />
+                {workspace.defaultRoute && (
+                  <Typography
+                    variant="caption"
+                    sx={{ display: 'block' }}
+                    color="text.secondary"
+                  >
+                    Live: {workspace.defaultRoute}
+                  </Typography>
+                )}
               </TableCell>
               <TableCell colSpan={2}>
                 <Typography variant="caption" color="text.secondary">
@@ -441,10 +464,9 @@ const AppRoutesEditor = ({
                 </Typography>
               </TableCell>
             </TableRow>
-            {policy.routes.map((rule) => {
-              const app = workspace.apps.find(
-                (app) => app.processPath === rule.processPath,
-              )
+            {rows.map((rule) => {
+              const app = appsByPath.get(rule.processPath)
+              const liveRoute = workspace.liveRouteSelections[rule.processPath]
               return (
                 <TableRow key={rule.processPath}>
                   <TableCell sx={{ maxWidth: 320, overflowWrap: 'anywhere' }}>
@@ -460,13 +482,25 @@ const AppRoutesEditor = ({
                       rule.route,
                       (route) =>
                         update({
-                          routes: policy.routes.map((entry) =>
-                            entry.processPath === rule.processPath
-                              ? { ...entry, route }
-                              : entry,
-                          ),
+                          routes:
+                            route === ''
+                              ? policy.routes.filter(
+                                  (entry) =>
+                                    entry.processPath !== rule.processPath,
+                                )
+                              : rule.override
+                                ? policy.routes.map((entry) =>
+                                    entry.processPath === rule.processPath
+                                      ? { ...entry, route }
+                                      : entry,
+                                  )
+                                : [
+                                    ...policy.routes,
+                                    { processPath: rule.processPath, route },
+                                  ],
                         }),
                       `Route for ${app?.name || rule.processPath}`,
+                      true,
                     )}
                   </TableCell>
                   <TableCell>
@@ -475,9 +509,26 @@ const AppRoutesEditor = ({
                       variant="outlined"
                       color={applied && !dirty ? 'success' : 'default'}
                       label={
-                        missing.includes(rule.route) ? 'Unavailable' : rowStatus
+                        rule.override
+                          ? missing.includes(rule.route)
+                            ? 'Unavailable'
+                            : rowStatus
+                          : liveRoute
+                            ? 'Default pending'
+                            : workspace.defaultRoute
+                              ? 'Uses default'
+                              : 'Uses profile'
                       }
                     />
+                    {liveRoute && (
+                      <Typography
+                        variant="caption"
+                        sx={{ display: 'block' }}
+                        color="text.secondary"
+                      >
+                        Live: {liveRoute}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell sx={{ whiteSpace: 'nowrap' }}>
                     {app ? (
@@ -497,25 +548,27 @@ const AppRoutesEditor = ({
                     )}
                   </TableCell>
                   <TableCell>
-                    <Tooltip title="Remove app override">
-                      <span>
-                        <IconButton
-                          size="small"
-                          disabled={!editable}
-                          aria-label={`Remove ${app?.name || rule.processPath}`}
-                          onClick={() =>
-                            update({
-                              routes: policy.routes.filter(
-                                (entry) =>
-                                  entry.processPath !== rule.processPath,
-                              ),
-                            })
-                          }
-                        >
-                          <DeleteOutlineRounded />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
+                    {rule.override && (
+                      <Tooltip title="Return to default routing">
+                        <span>
+                          <IconButton
+                            size="small"
+                            disabled={!editable}
+                            aria-label={`Use default for ${app?.name || rule.processPath}`}
+                            onClick={() =>
+                              update({
+                                routes: policy.routes.filter(
+                                  (entry) =>
+                                    entry.processPath !== rule.processPath,
+                                ),
+                              })
+                            }
+                          >
+                            <DeleteOutlineRounded />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                   </TableCell>
                 </TableRow>
               )
@@ -523,6 +576,12 @@ const AppRoutesEditor = ({
           </TableBody>
         </Table>
       </TableContainer>
+      {unassignedActive.length > 50 && (
+        <Typography variant="caption" color="text.secondary">
+          Showing the first 50 active apps without overrides. All saved
+          overrides remain visible.
+        </Typography>
+      )}
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
         <Button
           variant="contained"
@@ -548,12 +607,15 @@ const AppRoutesEditor = ({
                 profileUid: workspace.profileUid,
                 profileName: workspace.profileName || workspace.profileUid,
                 enabled: policy.enabled,
+                applyMode: workspace.applyMode,
               })
           }}
         >
-          {policy.enabled
-            ? 'Apply to current profile'
-            : 'Restore profile routing'}
+          {workspace.applyMode === 'live'
+            ? 'Apply live'
+            : policy.enabled
+              ? 'Set up routing'
+              : 'Restore profile routing'}
         </Button>
         <Button
           disabled={busy || (!dirty && !stale && !input)}
@@ -582,18 +644,30 @@ const AppRoutesEditor = ({
       <BaseDialog
         open={applyTarget !== null}
         title={
-          applyTarget?.enabled
-            ? 'Apply application routing?'
-            : 'Restore profile routing?'
+          applyTarget?.applyMode === 'live'
+            ? 'Apply route changes live?'
+            : applyTarget?.enabled
+              ? 'Apply application routing?'
+              : 'Restore profile routing?'
         }
         disableOk={
           busy ||
           dirty ||
           stale ||
           applyTarget?.generation !== workspace.policy.generation ||
-          applyTarget?.profileUid !== workspace.profileUid
+          applyTarget?.profileUid !== workspace.profileUid ||
+          applyTarget?.applyMode !== workspace.applyMode ||
+          workspace.coreMode !== 'rule' ||
+          !workspace.storageWritable ||
+          (Boolean(applyTarget?.enabled) && missing.length > 0)
         }
-        okBtn={applyTarget?.enabled ? 'Apply routing' : 'Restore routing'}
+        okBtn={
+          applyTarget?.applyMode === 'live'
+            ? 'Apply live'
+            : applyTarget?.enabled
+              ? 'Reload and apply'
+              : 'Reload and restore'
+        }
         cancelBtn="Cancel"
         disableCancel={busy}
         onCancel={() => {
@@ -609,9 +683,11 @@ const AppRoutesEditor = ({
             Profile: {applyTarget?.profileName}
           </Typography>
           <Typography variant="body2">
-            {applyTarget?.enabled
-              ? 'This reloads the core with app rules and the default route before the profile’s original rules. Only new connections are reliably affected.'
-              : 'This reloads the core without this table’s overrides, restoring the profile’s own routing rules.'}
+            {applyTarget?.applyMode === 'live'
+              ? 'This updates existing managed route selections without a full configuration reload, then verifies them by reading them back. New connections use the new selections; existing connections may keep their previous route. Zero interruption is not guaranteed.'
+              : applyTarget?.enabled
+                ? 'This performs a full core configuration reload and may briefly interrupt connections. App rules and the default route take priority over the profile’s original rules.'
+                : 'This performs a full core configuration reload and may briefly interrupt connections, restoring the profile’s own routing rules.'}
           </Typography>
           <Typography variant="body2">
             The core must already be in Rule mode. No profile switch,
@@ -627,6 +703,12 @@ const AppRoutesEditor = ({
             <Alert severity="warning">
               The saved generation changed. Close this dialog and review the
               latest table before applying.
+            </Alert>
+          )}
+          {applyTarget?.applyMode !== workspace.applyMode && (
+            <Alert severity="warning">
+              The apply method changed. Close this dialog and review the current
+              routing state before applying.
             </Alert>
           )}
         </Stack>

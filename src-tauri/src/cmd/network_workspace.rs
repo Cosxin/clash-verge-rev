@@ -25,8 +25,9 @@ pub async fn save_network_app_routes(
 pub async fn apply_network_app_routes(
     expected_generation: u64,
     expected_profile_uid: String,
+    expected_apply_mode: String,
 ) -> CmdResult<crate::core::network_app_routes::AppRoutingWorkspace> {
-    crate::core::network_app_routes::apply(expected_generation, expected_profile_uid)
+    crate::core::network_app_routes::apply(expected_generation, expected_profile_uid, expected_apply_mode)
         .await
         .stringify_err()
 }

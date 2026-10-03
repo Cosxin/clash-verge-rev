@@ -41,6 +41,9 @@ export interface AppRoutingWorkspace {
   coreMode: string | null
   processLookup: string | null
   status: 'disabled' | 'saved' | 'applied' | 'error'
+  applyMode: 'live' | 'setup'
+  liveRouteSelections: Record<string, string>
+  defaultRoute: string | null
   reason: string
   storageWritable: boolean
   apps: AppRouteCandidate[]

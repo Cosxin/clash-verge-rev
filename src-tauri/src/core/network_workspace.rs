@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, OnceCell};
 static STATE: OnceCell<Mutex<NetworkState>> = OnceCell::const_new();
 static STARTED: AtomicBool = AtomicBool::new(false);
 
-#[cfg(test)]
+#[cfg(all(test, feature = "clippy"))]
 pub(crate) fn initialize_test_store(path: PathBuf, store: NetworkStore) -> Result<(), String> {
     STATE
         .set(Mutex::new(NetworkState {

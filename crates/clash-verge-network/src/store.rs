@@ -20,6 +20,8 @@ pub struct NetworkStore {
     pub active_app_routes: Option<AppRoutingPolicy>,
     #[serde(default)]
     pub active_app_route_profile: Option<String>,
+    #[serde(default)]
+    pub active_app_route_slots: bool,
 }
 
 impl Default for NetworkStore {
@@ -33,6 +35,7 @@ impl Default for NetworkStore {
             app_routes: AppRoutingPolicy::default(),
             active_app_routes: None,
             active_app_route_profile: None,
+            active_app_route_slots: false,
         }
     }
 }
@@ -146,6 +149,17 @@ mod tests {
         let loaded = NetworkStore::load(&path, 1000)?;
         assert_eq!(loaded.policy.generation, 1);
         assert!(!loaded.recording_enabled);
+        assert!(!loaded.active_app_route_slots);
+        let mut legacy = serde_json::to_value(&store).map_err(|error| error.to_string())?;
+        legacy
+            .as_object_mut()
+            .ok_or("Expected store object")?
+            .remove("activeAppRouteSlots");
+        assert!(
+            !serde_json::from_value::<NetworkStore>(legacy)
+                .map_err(|error| error.to_string())?
+                .active_app_route_slots
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
