@@ -268,8 +268,8 @@ mod tests {
             route: "DIRECT".to_owned(),
         });
         assert!(policy.validate().is_err());
-        for (first, second) in [("/usr/bin/σ", "/usr/bin/ς"), ("/usr/bin/ſ", "/usr/bin/s")] {
-            policy.routes = [first, second]
+        for paths in [("/usr/bin/σ", "/usr/bin/ς"), ("/usr/bin/ſ", "/usr/bin/s")] {
+            policy.routes = <[&str; 2]>::from(paths)
                 .into_iter()
                 .map(|path| AppRouteRule {
                     process_path: path.to_owned(),

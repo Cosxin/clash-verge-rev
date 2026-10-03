@@ -171,8 +171,16 @@ pub struct NativeEvents {
 
 pub async fn events(after_sequence: u64) -> Result<NativeEvents, String> {
     let value = exchange("events", json!({"afterSequence": after_sequence, "limit":256})).await?;
+    parse_events(value, after_sequence)
+}
+
+fn parse_events(value: Value, after_sequence: u64) -> Result<NativeEvents, String> {
     let batch: NativeEvents = serde_json::from_value(value).map_err(|error| error.to_string())?;
-    if batch.events.len() > 256 || batch.instance_id.is_empty() || batch.instance_id.len() > 128 {
+    if batch.events.len() > 256
+        || batch.instance_id.is_empty()
+        || batch.instance_id.len() > 128
+        || batch.instance_id.chars().any(char::is_control)
+    {
         return Err("Invalid native event page scope or bound".to_owned());
     }
     let mut sequence = after_sequence;
@@ -183,7 +191,7 @@ pub async fn events(after_sequence: u64) -> Result<NativeEvents, String> {
         }
         sequence = event.sequence;
     }
-    if !batch.events.is_empty() && batch.next_sequence != sequence {
+    if batch.next_sequence != sequence {
         return Err("Native event cursor is not acknowledged".to_owned());
     }
     Ok(batch)
@@ -241,5 +249,36 @@ mod tests {
         assert!(decode_response(br#"{"schemaVersion":1,"ok":false,"error":"not installed"}"#).is_err());
         assert!(decode_response(br#"{"schemaVersion":1,"ok":true}"#).is_ok());
         assert!(decode_response(&vec![b' '; MAX_RESPONSE as usize + 1]).is_err());
+    }
+
+    #[test]
+    fn native_event_cursor_acknowledges_only_valid_returned_events() {
+        let event = json!({
+            "flowId":"flow", "sequence":42, "timeMs":1,
+            "kind":"open", "identityConfidence":"unknown",
+            "sourceIp":"127.0.0.1", "sourcePort":1234,
+            "destinationIp":"127.0.0.1", "destinationPort":443,
+            "network":"tcp", "counterSemantics":"unavailable", "verdict":"observe"
+        });
+        let page = |events: Vec<Value>, next: u64| {
+            json!({
+                "instanceId":"provider", "events":events,
+                "nextSequence":next, "droppedEvents":100
+            })
+        };
+        assert!(parse_events(page(vec![], 41), 41).is_ok());
+        assert!(parse_events(page(vec![], 42), 41).is_err());
+        assert!(parse_events(page(vec![], 40), 41).is_err());
+        assert!(parse_events(page(vec![event.clone()], 42), 41).is_ok());
+        assert!(parse_events(page(vec![event.clone()], 43), 41).is_err());
+        assert!(parse_events(page(vec![event.clone(), event.clone()], 42), 41).is_err());
+        assert!(parse_events(page(vec![event.clone(); 257], 42), 41).is_err());
+        let mut gap = event;
+        gap["sequence"] = json!(45);
+        // A valid discontinuity reaches the recorder, which persists the coverage gap.
+        assert!(parse_events(page(vec![gap], 45), 41).is_ok());
+        let mut invalid_scope = page(vec![], 41);
+        invalid_scope["instanceId"] = json!("provider\n");
+        assert!(parse_events(invalid_scope, 41).is_err());
     }
 }

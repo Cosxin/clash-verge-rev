@@ -8,6 +8,8 @@
 - Preserve unsaved Network edits across refreshes, tab changes and window hiding; reject stale saves without losing the draft.
 - Reject stale app-ban confirmations before a restarted native provider changes enforcement.
 - Show live route choices only while verified routing rules are active.
+- Catch up with busy native traffic and report gaps only when events were actually missed.
+- Exclude pre-recording and paused-period bytes from observed traffic totals.
 
 **🖥️ Windows**
 

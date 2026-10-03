@@ -180,7 +180,7 @@ impl ConnectionHistory {
             .records
             .iter()
             .enumerate()
-            .filter(|(_, record)| record.source == "mihomo")
+            .filter(|(_, record)| record.source == "mihomo" && record.epoch == epoch)
             .map(|(index, record)| ((record.core_id.clone(), record.start.clone()), index))
             .collect();
         for sample in samples {
@@ -201,7 +201,6 @@ impl ConnectionHistory {
                 record.upload = sample.upload;
                 record.download = sample.download;
                 record.last_seen_at = now;
-                record.epoch = epoch.to_owned();
                 record.state = HistoryState::Active;
                 record.observed_ended_at = None;
             } else {
@@ -233,8 +232,8 @@ impl ConnectionHistory {
                     network: bounded(&sample.network, 16),
                     upload: sample.upload,
                     download: sample.download,
-                    observed_upload: sample.upload,
-                    observed_download: sample.download,
+                    observed_upload: 0,
+                    observed_download: 0,
                     counter_resets: 0,
                     chains: sample.chains.iter().take(16).map(|value| bounded(value, 256)).collect(),
                     rule: bounded(&sample.rule, 256),
@@ -454,7 +453,7 @@ mod tests {
         history.sample("epoch", &[sample(10, 20)], 3000, &limits);
         history.sample("epoch", &[], 4000, &limits);
         assert_eq!(history.records.len(), 1);
-        assert_eq!(history.records[0].observed_upload, 160);
+        assert_eq!(history.records[0].observed_upload, 60);
         assert_eq!(history.records[0].counter_resets, 1);
         assert_eq!(history.records[0].state, HistoryState::EndedIncomplete);
         assert_eq!(history.records[0].last_seen_at, 3000);
@@ -503,13 +502,51 @@ mod tests {
         history.sample("epoch-b", &[sample(100, 200)], 3000, &limits);
         history.sample("epoch-b", &[], 4000, &limits);
         history.sample("epoch-b", &[sample(150, 250)], 5000, &limits);
-        assert_eq!(history.records.len(), 1);
-        assert_eq!(history.records[0].observed_upload, 150);
-        assert_eq!(history.records[0].state, HistoryState::Active);
+        assert_eq!(history.records.len(), 2);
+        assert_eq!(history.records[0].observed_upload, 0);
+        assert_eq!(history.records[0].state, HistoryState::EndedIncomplete);
+        assert_eq!(history.records[1].observed_upload, 50);
+        assert_eq!(history.records[1].state, HistoryState::Active);
         assert_eq!(history.gap_count, 1);
         history.prune_to_bytes(1);
         assert!(history.records.is_empty());
-        assert_eq!(history.dropped_records, 1);
+        assert_eq!(history.dropped_records, 2);
+    }
+
+    #[test]
+    fn recording_epochs_exclude_disabled_and_pre_session_cumulative_bytes() -> Result<(), String> {
+        let mut history = ConnectionHistory::default();
+        let limits = HistoryLimits::default();
+        history.sample("recording-a", &[sample(100, 200)], 1000, &limits);
+        assert_eq!(history.records[0].observed_upload, 0);
+        history.sample("recording-a", &[sample(150, 250)], 2000, &limits);
+        history.interrupt(3000, false);
+        history.sample("recording-b", &[sample(900, 1000)], 4000, &limits);
+        history.sample("recording-b", &[sample(925, 1050)], 5000, &limits);
+        let saved = serde_json::to_vec(&history).map_err(|error| error.to_string())?;
+        let mut resumed: ConnectionHistory = serde_json::from_slice(&saved).map_err(|error| error.to_string())?;
+        resumed.sample("session-c", &[sample(1000, 1200)], 6000, &limits);
+        resumed.sample("session-c", &[sample(1100, 1400)], 7000, &limits);
+        assert_eq!(resumed.records.len(), 3);
+        assert_eq!(
+            resumed
+                .records
+                .iter()
+                .map(|record| record.id.clone())
+                .collect::<HashSet<_>>()
+                .len(),
+            3
+        );
+        assert_eq!(resumed.records[0].epoch, "recording-a");
+        assert_eq!(resumed.records[1].epoch, "recording-b");
+        assert_eq!(resumed.records[2].epoch, "session-c");
+        assert_eq!(resumed.records[0].state, HistoryState::EndedIncomplete);
+        assert_eq!(resumed.records[1].state, HistoryState::EndedIncomplete);
+        assert_eq!(resumed.records[2].state, HistoryState::Active);
+        let page = resumed.query(&HistoryQuery::default());
+        assert_eq!(page.observed_upload, Some(175));
+        assert_eq!(page.observed_download, Some(300));
+        Ok(())
     }
 
     #[test]
@@ -529,7 +566,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(page.total, 1);
-        assert_eq!(page.observed_upload, Some(100));
-        assert_eq!(page.observed_download, Some(200));
+        assert_eq!(page.observed_upload, Some(0));
+        assert_eq!(page.observed_download, Some(0));
     }
 }

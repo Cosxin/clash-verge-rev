@@ -293,7 +293,7 @@ mod tests {
             json!({"query": {"search":"private.example", "offset":0, "limit":100}}),
         )?;
         assert_eq!(history["total"], 1);
-        assert_eq!(history["observedUpload"], 100);
+        assert_eq!(history["observedUpload"], 0);
         let redacted = invoke(&window, "export_network_history", json!({}))?;
         let redacted = redacted.as_str().ok_or("History export must be a JSON string")?;
         assert!(!redacted.contains("private.example"));

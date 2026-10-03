@@ -2,6 +2,7 @@ use crate::{core::handle::Handle, process::AsyncHandler, utils::dirs};
 use clash_verge_network::{FlowSample, HistoryLimits, NativeAdapterStatus, NetworkPolicy, NetworkStore};
 use serde::Serialize;
 use std::{
+    future::Future,
     path::PathBuf,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -224,6 +225,67 @@ impl NetworkState {
         recorder.outage = true;
         true
     }
+
+    async fn accept_native_page(
+        &mut self,
+        recorder: &mut NativeRecorderCursor,
+        epoch: &str,
+        platform: &str,
+        result: Result<super::native_firewall::NativeEvents, String>,
+    ) -> bool {
+        if !self.store.recording_enabled || !self.writable || self.recording_epoch != epoch {
+            return false;
+        }
+        let batch = match result {
+            Ok(batch)
+                if batch.instance_id == recorder.instance && self.native_status.instance_id == recorder.instance =>
+            {
+                batch
+            }
+            result => {
+                let reason = result.err().unwrap_or_else(|| {
+                    "Native provider instance changed during event read; recording has a gap".to_owned()
+                });
+                self.native_outage(recorder, reason).await;
+                return false;
+            }
+        };
+        let mut next = self.store.clone();
+        let mut previous = recorder.sequence;
+        let mut prior_outage = recorder.outage;
+        for event in &batch.events {
+            if previous.checked_add(1) != Some(event.sequence) {
+                let gaps = next.history.gap_count;
+                next.history.interrupt_native(now_ms());
+                // A known outage covers the first boundary only, not distinct losses after newly observed flows.
+                if prior_outage {
+                    next.history.gap_count = gaps;
+                }
+            }
+            prior_outage = false;
+            previous = event.sequence;
+            if let Err(error) = next
+                .history
+                .native_event(&recorder.instance, epoch, platform, event, &next.limits)
+            {
+                self.native_outage(recorder, error).await;
+                return false;
+            }
+        }
+        if !batch.events.is_empty() {
+            if let Err(error) = self.commit(next).await {
+                self.native_outage(recorder, error).await;
+                return false;
+            }
+            recorder.sequence = batch.next_sequence;
+            self.last_sample_at = Some(now_ms());
+        }
+        // Lifetime ring evictions include records this cursor already consumed; only sequence gaps prove missed events.
+        recorder.dropped = batch.dropped_events;
+        recorder.outage = false;
+        self.native_error = None;
+        batch.events.len() == NATIVE_PAGE_SIZE
+    }
 }
 
 pub fn start() {
@@ -313,6 +375,10 @@ struct NativeRecorderCursor {
     outage: bool,
 }
 
+const NATIVE_PAGE_SIZE: usize = 256;
+const NATIVE_MAX_PAGES: usize = 8;
+const NATIVE_DRAIN_BUDGET: Duration = Duration::from_secs(2);
+
 impl NativeRecorderCursor {
     fn needs_baseline(&self, epoch: &str, status: &NativeAdapterStatus) -> bool {
         self.recording_epoch != epoch || self.instance != status.instance_id
@@ -324,6 +390,40 @@ impl NativeRecorderCursor {
         self.sequence = status.event_sequence;
         self.dropped = status.dropped_events;
         self.outage = false;
+    }
+}
+
+async fn drain_native_events<F, R>(
+    state: &Mutex<NetworkState>,
+    recorder: &mut NativeRecorderCursor,
+    epoch: &str,
+    platform: &str,
+    mut read: F,
+) where
+    F: FnMut(u64) -> R + Send,
+    R: Future<Output = Result<super::native_firewall::NativeEvents, String>> + Send,
+{
+    let deadline = tokio::time::Instant::now() + NATIVE_DRAIN_BUDGET;
+    for _ in 0..NATIVE_MAX_PAGES {
+        let Ok(current) = tokio::time::timeout_at(deadline, state.lock()).await else {
+            return;
+        };
+        if !current.store.recording_enabled || !current.writable || current.recording_epoch != epoch {
+            return;
+        }
+        drop(current);
+        if tokio::time::Instant::now() >= deadline {
+            return;
+        }
+        let result = tokio::time::timeout_at(deadline, read(recorder.sequence))
+            .await
+            .unwrap_or_else(|_| Err("Native event catch-up read timed out; recording has a coverage gap".to_owned()));
+        let mut current = state.lock().await;
+        if !current.accept_native_page(recorder, epoch, platform, result).await {
+            return;
+        }
+        // Do not cancel a persistence operation: its blocking writer could otherwise race a later recording toggle.
+        drop(current);
     }
 }
 
@@ -389,55 +489,14 @@ fn start_native_recorder() {
                 drop(current);
                 epoch
             };
-            let result = super::native_firewall::events(recorder.sequence).await;
-            let mut current = state.lock().await;
-            if !current.store.recording_enabled || current.recording_epoch != epoch {
-                drop(current);
-                continue;
-            }
-            match result {
-                Ok(batch) if batch.instance_id == recorder.instance => {
-                    let limits = current.store.limits.clone();
-                    let mut next = current.store.clone();
-                    if batch.dropped_events > recorder.dropped && !recorder.outage {
-                        next.history.interrupt_native(now_ms());
-                    }
-                    let mut error = None;
-                    for event in &batch.events {
-                        if let Err(failure) =
-                            next.history
-                                .native_event(&recorder.instance, &status.platform, event, &limits)
-                        {
-                            error = Some(failure);
-                            break;
-                        }
-                    }
-                    if let Some(error) = error {
-                        current.native_outage(&mut recorder, error).await;
-                        drop(current);
-                        continue;
-                    }
-                    let nonempty = !batch.events.is_empty();
-                    if (!nonempty && batch.dropped_events == recorder.dropped) || current.commit(next).await.is_ok() {
-                        if nonempty {
-                            recorder.sequence = batch.next_sequence;
-                            current.last_sample_at = Some(now_ms());
-                        }
-                        recorder.dropped = batch.dropped_events;
-                        recorder.outage = false;
-                        current.native_error = None;
-                    }
-                    drop(current);
-                }
-                result => {
-                    let reason = match result {
-                        Err(error) => error,
-                        _ => "Native provider instance changed during event read; recording has a gap".to_owned(),
-                    };
-                    current.native_outage(&mut recorder, reason).await;
-                    drop(current);
-                }
-            }
+            drain_native_events(
+                state,
+                &mut recorder,
+                &epoch,
+                &status.platform,
+                super::native_firewall::events,
+            )
+            .await;
         }
     });
 }
@@ -447,6 +506,274 @@ mod tests {
     use super::*;
     use clash_verge_network::{HistoryState, NativeFlowEvent};
     use serde_json::json;
+
+    fn recorder_fixture() -> NetworkState {
+        NetworkState {
+            store: NetworkStore {
+                recording_enabled: true,
+                ..NetworkStore::default()
+            },
+            path: std::env::temp_dir()
+                .join(format!("native-catch-up-{}", nanoid::nanoid!()))
+                .join("workspace.json"),
+            epoch: "core-epoch".to_owned(),
+            recording_epoch: "recording-epoch".to_owned(),
+            last_sample_at: None,
+            sample_error: None,
+            storage_error: None,
+            writable: true,
+            samples_since_save: 0,
+            native_status: NativeAdapterStatus {
+                instance_id: "native-instance".to_owned(),
+                active: true,
+                authenticated: true,
+                monitoring: true,
+                ..NativeAdapterStatus::unavailable("fixture")
+            },
+            native_error: None,
+        }
+    }
+
+    fn native_page(
+        instance: &str,
+        start: u64,
+        count: usize,
+        dropped_events: u64,
+    ) -> Result<super::super::native_firewall::NativeEvents, String> {
+        let events: Vec<NativeFlowEvent> = (start..)
+            .take(count)
+            .map(|sequence| {
+                serde_json::from_value(json!({
+                    "flowId":"native-flow","sequence":sequence,"timeMs":now_ms(),"processPath":"/bin/native-app",
+                    "identityConfidence":"inferred","sourceIp":"192.0.2.1","sourcePort":50100,
+                    "destinationIp":"192.0.2.2","destinationPort":443,"network":"tcp",
+                    "packetBytes":40,"direction":"outbound","verdict":"allow","policyGeneration":1
+                }))
+                .map_err(|error| error.to_string())
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(super::super::native_firewall::NativeEvents {
+            instance_id: instance.to_owned(),
+            next_sequence: events
+                .last()
+                .map_or_else(|| start.saturating_sub(1), |event| event.sequence),
+            events,
+            dropped_events,
+        })
+    }
+
+    fn remove_recorder_fixture(path: &std::path::Path) -> Result<(), String> {
+        std::fs::remove_file(path).map_err(|error| error.to_string())?;
+        std::fs::remove_dir(path.parent().ok_or("Fixture directory missing")?).map_err(|error| error.to_string())
+    }
+
+    fn saved_recorder_fixture(path: &std::path::Path) -> Result<NetworkStore, String> {
+        serde_json::from_slice(&std::fs::read(path).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tokio::test]
+    async fn native_catch_up_drains_bounded_pages_without_false_eviction_gaps() -> Result<(), String> {
+        let current = recorder_fixture();
+        let path = current.path.clone();
+        let mut recorder = NativeRecorderCursor::default();
+        recorder.baseline(&current.recording_epoch, &current.native_status);
+        let state = Mutex::new(current);
+        let mut cursors = Vec::new();
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| {
+            cursors.push(after);
+            let count = if after < 512 { NATIVE_PAGE_SIZE } else { 3 };
+            async move { native_page("native-instance", after + 1, count, 5000 + after) }
+        })
+        .await;
+        assert_eq!(cursors, [0, 256, 512]);
+        assert_eq!(recorder.sequence, 515);
+        {
+            let current = state.lock().await;
+            assert_eq!(current.store.history.gap_count, 0);
+            assert_eq!(current.store.history.records[0].observed_upload, 515 * 40);
+        }
+        cursors.clear();
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| {
+            cursors.push(after);
+            async move { native_page("native-instance", after + 1, NATIVE_PAGE_SIZE, 10_000 + after) }
+        })
+        .await;
+        assert_eq!(cursors.len(), NATIVE_MAX_PAGES);
+        assert_eq!(recorder.sequence, 515 + 2048);
+        assert_eq!(state.lock().await.store.history.gap_count, 0);
+        let before = std::fs::read(&path).map_err(|error| error.to_string())?;
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| async move {
+            native_page("native-instance", after + 1, 0, 99_999)
+        })
+        .await;
+        assert_eq!((recorder.sequence, recorder.dropped), (515 + 2048, 99_999));
+        assert_eq!(std::fs::read(&path).map_err(|error| error.to_string())?, before);
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn native_catch_up_missing_sequences_and_read_failures_persist_one_outage() -> Result<(), String> {
+        let current = recorder_fixture();
+        let path = current.path.clone();
+        let mut recorder = NativeRecorderCursor::default();
+        recorder.baseline(&current.recording_epoch, &current.native_status);
+        let state = Mutex::new(current);
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |_| async {
+            let mut page = native_page("native-instance", 1, 2, 0)?;
+            page.events[1].sequence = 3;
+            page.events[1].flow_id = "unrelated-flow".to_owned();
+            page.next_sequence = 3;
+            Ok(page)
+        })
+        .await;
+        assert_eq!(recorder.sequence, 3);
+        {
+            let current = state.lock().await;
+            assert_eq!(current.store.history.gap_count, 1);
+            assert_eq!(current.store.history.records[0].state, HistoryState::EndedIncomplete);
+            assert_eq!(current.store.history.records[1].state, HistoryState::Active);
+        }
+        for _ in 0..2 {
+            drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |_| async {
+                Err("Fixture provider unavailable".to_owned())
+            })
+            .await;
+        }
+        assert_eq!(recorder.sequence, 3);
+        assert!(recorder.outage);
+        assert_eq!(state.lock().await.store.history.gap_count, 2);
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| async move {
+            let mut page = native_page("native-instance", after + 1, 2, 9999)?;
+            page.events[0].flow_id = "prefix-after-outage".to_owned();
+            page.events[1].sequence += 1;
+            page.events[1].flow_id = "after-later-gap".to_owned();
+            page.next_sequence = page.events[1].sequence;
+            Ok(page)
+        })
+        .await;
+        {
+            let current = state.lock().await;
+            assert_eq!(current.store.history.gap_count, 3);
+            assert_eq!(current.store.history.records[2].state, HistoryState::EndedIncomplete);
+            assert_eq!(current.store.history.records[3].state, HistoryState::Active);
+        }
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| async move {
+            native_page("native-instance", after + 1, 1, 9999)
+        })
+        .await;
+        assert!(!recorder.outage);
+        assert_eq!(recorder.sequence, 7);
+        assert_eq!(state.lock().await.store.history.gap_count, 3);
+        let saved = saved_recorder_fixture(&path)?;
+        assert_eq!(saved.history.gap_count, 3);
+        assert_eq!(
+            saved
+                .history
+                .records
+                .iter()
+                .find(|record| record.core_id == "native-flow")
+                .ok_or("Fixture native flow missing")?
+                .observed_upload,
+            80
+        );
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn native_catch_up_deadline_stops_reads_and_persists_timeout_once() -> Result<(), String> {
+        let current = recorder_fixture();
+        let path = current.path.clone();
+        let mut recorder = NativeRecorderCursor::default();
+        recorder.baseline(&current.recording_epoch, &current.native_status);
+        let state = Mutex::new(current);
+        let mut calls = 0;
+        for _ in 0..2 {
+            drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |_| {
+                calls += 1;
+                std::future::pending()
+            })
+            .await;
+        }
+        assert_eq!(calls, 2);
+        assert_eq!(recorder.sequence, 0);
+        assert!(recorder.outage);
+        assert_eq!(state.lock().await.store.history.gap_count, 1);
+        assert_eq!(saved_recorder_fixture(&path)?.history.gap_count, 1);
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn native_catch_up_fences_toggle_restart_and_failed_persistence() -> Result<(), String> {
+        let current = recorder_fixture();
+        let path = current.path.clone();
+        let mut recorder = NativeRecorderCursor::default();
+        recorder.baseline(&current.recording_epoch, &current.native_status);
+        let state = Mutex::new(current);
+        drain_native_events(&state, &mut recorder, "recording-epoch", "linux", |after| {
+            let state = &state;
+            async move {
+                if after != 0 {
+                    let mut current = state.lock().await;
+                    current.set_recording(false).await?;
+                    current.set_recording(true).await?;
+                    current.native_status.event_sequence = 1000;
+                }
+                native_page("native-instance", after + 1, NATIVE_PAGE_SIZE, 0)
+            }
+        })
+        .await;
+        assert_eq!(recorder.sequence, 256);
+        let epoch = {
+            let current = state.lock().await;
+            assert_eq!(current.store.history.records[0].observed_upload, 256 * 40);
+            recorder.baseline(&current.recording_epoch, &current.native_status);
+            current.recording_epoch.clone()
+        };
+        assert_eq!(recorder.sequence, 1000);
+        drain_native_events(&state, &mut recorder, &epoch, "linux", |after| {
+            let state = &state;
+            async move {
+                if after == 1000 {
+                    native_page("native-instance", after + 1, NATIVE_PAGE_SIZE, 0)
+                } else {
+                    let mut current = state.lock().await;
+                    current.native_status.instance_id = "restarted-instance".to_owned();
+                    current.native_status.event_sequence = 2000;
+                    drop(current);
+                    native_page("restarted-instance", 2001, 1, 0)
+                }
+            }
+        })
+        .await;
+        assert_eq!(recorder.sequence, 1256);
+        assert!(recorder.outage);
+        let denied = path.with_file_name("not-a-directory");
+        std::fs::write(&denied, b"fixture").map_err(|error| error.to_string())?;
+        let before = std::fs::read(&path).map_err(|error| error.to_string())?;
+        {
+            let mut current = state.lock().await;
+            assert_eq!(current.store.history.gap_count, 1);
+            recorder.baseline(&current.recording_epoch, &current.native_status);
+            current.path = denied.join("workspace.json");
+        }
+        drain_native_events(&state, &mut recorder, &epoch, "linux", |after| async move {
+            native_page("restarted-instance", after + 1, 1, 10)
+        })
+        .await;
+        assert_eq!((recorder.sequence, recorder.dropped), (2000, 0));
+        assert!(!recorder.outage);
+        {
+            let current = state.lock().await;
+            assert_eq!(current.store.history.records.len(), 2);
+            assert_eq!(current.store.history.gap_count, 1);
+            assert!(current.storage_error.is_some());
+            drop(current);
+        }
+        assert_eq!(std::fs::read(&path).map_err(|error| error.to_string())?, before);
+        std::fs::remove_file(denied).map_err(|error| error.to_string())?;
+        remove_recorder_fixture(&path)
+    }
 
     #[tokio::test]
     async fn native_recording_skips_disabled_backlogs_and_persists_one_outage() -> Result<(), String> {
@@ -508,7 +835,7 @@ mod tests {
         current
             .store
             .history
-            .native_event(&recorder.instance, "linux", &native, &limits)?;
+            .native_event(&recorder.instance, &current.recording_epoch, "linux", &native, &limits)?;
         assert!(current.native_outage(&mut recorder, "provider lost".to_owned()).await);
         assert!(
             current

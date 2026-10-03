@@ -42,6 +42,9 @@ an app bundle. Existing-flow teardown is not guaranteed (`new_flows_only`).
 Monitoring uses OS `NEFilterReport` cumulative bytes and close reports, without
 exporting packet payloads. The provider's lifetime is independent of the GUI.
 Events are a bounded volatile ring, not durable 24/7 history; the desktop must
-ingest them and exposes gaps. Signed live TCP/UDP IPv4/IPv6, loopback, PID reuse,
+ingest them and exposes gaps. Event pages acknowledge only returned events (or
+the requested cursor when empty). Lifetime ring evictions include events already
+consumed; a reader identifies missed events from sequence discontinuities.
+Signed live TCP/UDP IPv4/IPv6, loopback, PID reuse,
 byte-count and crash/coexistence behavior has not yet been qualified. Do not
 activate this unqualified filter on a daily machine with Little Snitch.

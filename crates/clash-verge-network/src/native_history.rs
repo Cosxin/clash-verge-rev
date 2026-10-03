@@ -66,6 +66,7 @@ impl ConnectionHistory {
     pub fn native_event(
         &mut self,
         instance: &str,
+        recording_epoch: &str,
         platform: &str,
         event: &NativeFlowEvent,
         limits: &HistoryLimits,
@@ -74,12 +75,21 @@ impl ConnectionHistory {
         if instance.is_empty()
             || instance.len() > 128
             || instance.chars().any(char::is_control)
+            || recording_epoch.is_empty()
+            || recording_epoch.len() > 128
+            || recording_epoch.chars().any(char::is_control)
             || !matches!(platform, "macos" | "windows" | "linux")
         {
             return Err("Invalid native event scope".to_owned());
         }
-        let id = format!("native:{platform}:{instance}:{}", event.flow_id);
+        let id = format!(
+            "native:{platform}:{}:{instance}:{}:{recording_epoch}:{}",
+            instance.len(),
+            recording_epoch.len(),
+            event.flow_id
+        );
         let index = self.records.iter().position(|record| record.id == id);
+        let first_seen = index.is_none();
         let index = if let Some(index) = index {
             index
         } else {
@@ -143,6 +153,11 @@ impl ConnectionHistory {
             (event.upload, event.download)
         };
         let cumulative = event.packet_bytes == 0 && event.counter_semantics == "cumulative";
+        if first_seen && cumulative && event.kind != "open" {
+            // Existing flows may include bytes from before this recording epoch.
+            record.upload = upload;
+            record.download = download;
+        }
         if cumulative && (upload < record.upload || download < record.download) {
             record.counter_resets = record.counter_resets.saturating_add(1);
         }
@@ -200,17 +215,17 @@ mod tests {
         })).map_err(|error| error.to_string())?;
         let mut history = ConnectionHistory::default();
         let limits = HistoryLimits::default();
-        history.native_event("boot", "macos", &event, &limits)?;
+        history.native_event("boot", "recording", "macos", &event, &limits)?;
         event.sequence = 2;
         event.kind = "update".to_owned();
         event.upload = 100;
         event.download = 200;
-        history.native_event("boot", "macos", &event, &limits)?;
-        history.native_event("boot", "macos", &event, &limits)?;
+        history.native_event("boot", "recording", "macos", &event, &limits)?;
+        history.native_event("boot", "recording", "macos", &event, &limits)?;
         event.sequence = 3;
         event.kind = "close".to_owned();
         event.upload = 150;
-        history.native_event("boot", "macos", &event, &limits)?;
+        history.native_event("boot", "recording", "macos", &event, &limits)?;
         assert_eq!(history.records[0].observed_upload, 150);
         assert_eq!(history.records[0].state, HistoryState::Closed);
         event.kind.clear();
@@ -218,8 +233,8 @@ mod tests {
         event.packet_bytes = 64;
         event.direction = "outbound".to_owned();
         event.sequence = 1;
-        history.native_event("linux-boot", "linux", &event, &limits)?;
-        history.native_event("linux-boot", "linux", &event, &limits)?;
+        history.native_event("linux-boot", "recording", "linux", &event, &limits)?;
+        history.native_event("linux-boot", "recording", "linux", &event, &limits)?;
         assert_eq!(
             history
                 .records
@@ -228,6 +243,76 @@ mod tests {
                 .map(|record| record.observed_upload),
             Some(64)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn native_recording_epochs_exclude_pre_enable_and_off_period_cumulative_bytes() -> Result<(), String> {
+        let mut event: NativeFlowEvent = serde_json::from_value(serde_json::json!({
+            "flowId":"flow","sequence":1,"timeMs":1000,"kind":"open","identityConfidence":"exact",
+            "sourceIp":"127.0.0.1","sourcePort":50100,"destinationIp":"127.0.0.1","destinationPort":8889,
+            "network":"tcp","upload":0,"download":0,"counterSemantics":"cumulative","verdict":"allow"
+        }))
+        .map_err(|error| error.to_string())?;
+        let mut history = ConnectionHistory::default();
+        let limits = HistoryLimits::default();
+        history.native_event("boot", "before-off", "macos", &event, &limits)?;
+        event.sequence = 2;
+        event.kind = "update".to_owned();
+        event.upload = 100;
+        event.download = 200;
+        history.native_event("boot", "before-off", "macos", &event, &limits)?;
+        history.interrupt(2000, false);
+
+        event.sequence = 10;
+        event.time_ms = 3000;
+        event.upload = 600;
+        event.download = 1200;
+        history.native_event("boot", "after-on", "macos", &event, &limits)?;
+        assert_eq!(history.records.len(), 2);
+        assert_ne!(history.records[0].id, history.records[1].id);
+        assert_eq!(history.records[0].epoch, "boot");
+        assert_eq!(history.records[1].epoch, "boot");
+        assert_eq!(history.records[0].state, HistoryState::EndedIncomplete);
+        assert_eq!(history.records[0].observed_upload, 100);
+        assert_eq!(history.records[0].observed_download, 200);
+        assert_eq!(history.records[1].upload, 600);
+        assert_eq!(history.records[1].download, 1200);
+        assert_eq!(history.records[1].observed_upload, 0);
+        assert_eq!(history.records[1].observed_download, 0);
+
+        event.sequence = 11;
+        event.time_ms = 4000;
+        event.upload = 750;
+        event.download = 1500;
+        history.native_event("boot", "after-on", "macos", &event, &limits)?;
+        history.native_event("boot", "after-on", "macos", &event, &limits)?;
+        assert_eq!(history.records[1].observed_upload, 150);
+        assert_eq!(history.records[1].observed_download, 300);
+
+        event.flow_id = "close-first".to_owned();
+        event.kind = "close".to_owned();
+        history.native_event("boot", "after-on", "macos", &event, &limits)?;
+        let closed = history.records.last().ok_or("Missing close-first record")?;
+        assert_eq!(closed.state, HistoryState::Closed);
+        assert_eq!(closed.observed_ended_at, Some(4000));
+        assert_eq!(closed.observed_upload, 0);
+        assert_eq!(closed.observed_download, 0);
+
+        event.flow_id = "open-in-epoch".to_owned();
+        event.kind = "open".to_owned();
+        event.upload = 10;
+        event.download = 20;
+        history.native_event("boot", "after-on", "macos", &event, &limits)?;
+        let opened = history.records.last().ok_or("Missing open record")?;
+        assert_eq!(opened.observed_upload, 10);
+        assert_eq!(opened.observed_download, 20);
+
+        let count = history.records.len();
+        for epoch in ["", "invalid\n", &"x".repeat(129)] {
+            assert!(history.native_event("boot", epoch, "macos", &event, &limits).is_err());
+            assert_eq!(history.records.len(), count);
+        }
         Ok(())
     }
 }
