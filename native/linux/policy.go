@@ -65,7 +65,7 @@ func decodeJSON(reader io.Reader, value any) error {
 	allowed := map[string]bool{"schemaVersion": true, "generation": true, "processPaths": true}
 	required := []string{"schemaVersion", "generation", "processPaths"}
 	if _, request := value.(*Request); request {
-		allowed = map[string]bool{"schemaVersion": true, "command": true, "expectedGeneration": true, "processPaths": true, "afterSequence": true, "limit": true}
+		allowed = map[string]bool{"schemaVersion": true, "command": true, "expectedGeneration": true, "expectedInstanceId": true, "processPaths": true, "afterSequence": true, "limit": true}
 		required = []string{"schemaVersion", "command"}
 	}
 	for keys.More() {
@@ -88,6 +88,9 @@ func decodeJSON(reader io.Reader, value any) error {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
 		return errors.New("invalid native JSON request")
+	}
+	if request, ok := value.(*Request); ok && request.Command == "apply-bans" && request.ExpectedInstanceID == nil {
+		return errors.New("apply-bans requires a string expectedInstanceId")
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return errors.New("native request must contain one JSON document")

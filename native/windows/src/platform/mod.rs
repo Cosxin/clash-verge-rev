@@ -362,10 +362,7 @@ impl State {
                     serde_json::from_value(value.get("data").cloned().ok_or("Missing app-ban request")?)
                         .map_err(|e| e.to_string())?;
                 self.policy = self.engine.policy()?;
-                if request.expected_generation != self.policy.as_ref().map_or(0, |p| p.generation) {
-                    return Err("Installed app-ban generation changed; reload before saving".into());
-                }
-                request.policy.validate(request.expected_generation)?;
+                request.validate(&self.instance_id, self.policy.as_ref().map_or(0, |p| p.generation))?;
                 self.engine.replace(&request.policy)?;
                 self.status()
             }

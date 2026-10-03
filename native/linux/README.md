@@ -52,11 +52,11 @@ Send one newline-delimited JSON document per connection; receive one JSON respon
 
 ```json
 {"schemaVersion":1,"command":"status"}
-{"schemaVersion":1,"command":"apply-bans","expectedGeneration":0,"processPaths":["/usr/bin/example"]}
+{"schemaVersion":1,"command":"apply-bans","expectedGeneration":0,"expectedInstanceId":"INSTANCE_FROM_STATUS","processPaths":["/usr/bin/example"]}
 {"schemaVersion":1,"command":"events","afterSequence":0,"limit":256}
 ```
 
-`apply-bans` replaces only the exact-path native ban list, validates all entries and uses generation compare-and-swap. It persists the root policy before acknowledgement. It fails without verified healthy queues and the exact dedicated table; a queue socket alone is not readiness. The policy and generation restore after daemon restart. Before any policy has been initialized, queued traffic blocks until an explicit successful application. The GUI's arbitrary preview policy is never treated as a native policy.
+`apply-bans` replaces only the exact-path native ban list, validates all entries and checks both generation and the required string `expectedInstanceId` from fresh status under the same policy/verdict lock. Missing or stale daemon instances are refused before persistence, even if a restarted daemon retains the same generation. It persists the root policy before acknowledgement. It fails without verified healthy queues and the exact dedicated table; a queue socket alone is not readiness. The policy and generation restore after daemon restart. Before any policy has been initialized, queued traffic blocks until an explicit successful application. The GUI's arbitrary preview policy is never treated as a native policy.
 
 Status includes `schemaVersion`, `ok`, `platform:linux`, `adapterId`, `instanceId`, `installed`, `ready`, `active`, `enforcementActive`, `authenticated`, `policyInitialized`, `monitoring`, `generation`, `processPaths`, `existingFlowBehavior`, `reason`, and coverage/error counters. Installed means the current dedicated table passed structural verification. Active additionally requires healthy queues; before policy initialization it means the queued traffic is blocked, not that a user ban list has been applied. This readiness permits an explicit first generation-0 policy application while `policyInitialized:false` remains truthful. Readiness is rechecked for status/apply requests and periodically, not inferred from a saved setting. `existingFlowBehavior:drop` refers to matching banned flows after initialization; before initialization every queued flow drops.
 

@@ -155,7 +155,7 @@ fn route_activity(
     let targets_available = std::iter::once(&policy.default_route)
         .chain(policy.routes.iter().map(|route| &route.route))
         .all(|target| available.contains(target));
-    let choices = slots
+    let choices = (slots && prefix_active)
         .then(|| slot_choices(active, available, proxies))
         .transpose()
         .ok()
@@ -982,6 +982,11 @@ mod tests {
             });
         }
         assert!(route_activity(&policy, &policy, true, &available, &proxies, &rules, true)?.applied);
+        let inactive = route_activity(&policy, &policy, true, &available, &proxies, &rules, false)?;
+        assert!(!inactive.applied);
+        assert!(inactive.live.is_empty());
+        assert!(inactive.default.is_none());
+        assert_eq!(inactive.apply_mode, "setup");
         proxies
             .proxies
             .get_mut(APP_ROUTE_DEFAULT_SLOT)

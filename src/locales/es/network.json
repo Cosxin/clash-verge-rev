@@ -27,8 +27,8 @@
   "capabilities": {
     "title": "Effective capabilities",
     "nativeFirewall": "Per-app firewall",
-    "perAppRouting": "Enforced per-app routing",
-    "wholeSystemMonitor": "Whole-system monitoring",
+    "perAppRouting": "Device-wide per-app routing",
+    "wholeSystemMonitor": "Device-wide network monitoring",
     "killSwitch": "Verified kill switch",
     "coreHistory": "Sampled mihomo history",
     "note": "A running proxy or TUN does not establish these native security guarantees."
@@ -119,7 +119,7 @@
     "title": "Observed core connections",
     "coverage": "Core-only, sampled and incomplete. No direct-traffic coverage or native verdicts. Disappearing from a snapshot is not proof of an exact close time.",
     "search": "Search app, destination or route",
-    "empty": "No saved observations. Enable recording on Overview to collect core-only history.",
+    "empty": "No saved observations. Enable recording in Settings to collect partial connection history.",
     "firstSeen": "First seen",
     "lastSeen": "Last seen",
     "application": "Application",

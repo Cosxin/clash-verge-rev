@@ -18,9 +18,20 @@ user consent, removal and coexistence with other filters remain release work.
 `status`, `apply-bans` and `events` use the desktop's bounded JSON contract.
 The listener accepts only the configured publisher's controller and owner UID
 (or root); the controller verifies the provider's signing requirement. Ban
-policies are root-owned, private, persistent and generation-checked. Missing
+policies are root-owned, private, persistent and instance/generation-checked. An
+`apply-bans` input is `{ "policy": { "schemaVersion": 1, "generation": 8,
+"processPaths": [] }, "expectedGeneration": 7, "expectedInstanceId": "<current
+status.instanceId>" }`. Refresh status after a provider restart: the instance and
+generation checks run together under the policy mutation lock before any save;
+missing or stale instance IDs cannot mutate the policy. Missing
 policy means fail-closed until an explicit policy is applied; corrupt policy is
 preserved and cannot be replaced through this interface.
+
+The controller's `self-test` exercises bounded policy/JSON validation only. To
+test the provider's exact CAS guard without launching a filter, compile
+`Native.m` plus `Provider.m` with `-DNC_PROVIDER_SELF_TEST` and the same SDK/link
+flags as `build.mjs`, then run that separate test executable. It performs no
+provider construction, XPC, policy persistence or activation.
 
 Coverage is TCP/UDP socket flows in both directions, including explicit loopback
 rules so an app's connection to a local proxy is not intentionally bypassed.

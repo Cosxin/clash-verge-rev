@@ -5,7 +5,7 @@
   "identifier": "io.github.cosxin.network-control.dev",
   "bundle": {
     "publisher": "Cosxin (development build)",
-    "longDescription": "Isolated NetworkControl developer build. Native firewall and per-app routing are not implemented.",
+    "longDescription": "Isolated NetworkControl developer build with explicit per-app Mihomo routing and partial connection history. Native adapters require separately qualified installation; native writes are disabled in this build.",
     "shortDescription": "NetworkControl developer preview",
     "externalBin": ["sidecar/verge-mihomo"],
     "resources": ["resources"],

@@ -16,9 +16,13 @@ AppData installation is not a valid LocalSystem service location. Both desktop
 and its fixed sibling must be installed in the protected machine-level directory.
 
 Commands: `status`; `apply-bans` with stdin JSON
-`{"policy":{"schemaVersion":1,"generation":1,"processPaths":[]},"expectedGeneration":0}`;
+`{"policy":{"schemaVersion":1,"generation":1,"processPaths":[]},"expectedGeneration":0,"expectedInstanceId":"INSTANCE_FROM_STATUS"}`;
 `events` with stdin JSON `{"afterSequence":0,"limit":100}`. Responses are JSON.
 `apply-bans` is the only controller command that changes native network policy.
+It requires the exact service `instanceId` from a fresh `status`, as well as the
+generation. Both are checked in the serialized policy mutation path before WFP
+replacement; a service restart invalidates an earlier request even if its persisted
+generation is unchanged. Missing or stale instance IDs are refused.
 
 Bans are persistent exact-path WFP ALE filters for IPv4/IPv6 inbound and outbound
 connections. Replacement and the persistent WFP general-context generation marker

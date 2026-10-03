@@ -18,6 +18,7 @@ type Request struct {
 	SchemaVersion      int      `json:"schemaVersion"`
 	Command            string   `json:"command"`
 	ExpectedGeneration *uint64  `json:"expectedGeneration,omitempty"`
+	ExpectedInstanceID *string  `json:"expectedInstanceId,omitempty"`
 	ProcessPaths       []string `json:"processPaths,omitempty"`
 	AfterSequence      uint64   `json:"afterSequence,omitempty"`
 	Limit              uint32   `json:"limit,omitempty"`
@@ -146,12 +147,14 @@ func (s *adapterState) handle(request Request) Response {
 	} else {
 		switch request.Command {
 		case "status":
-			if request.ExpectedGeneration != nil || request.ProcessPaths != nil || request.AfterSequence != 0 || request.Limit != 0 {
+			if request.ExpectedGeneration != nil || request.ExpectedInstanceID != nil || request.ProcessPaths != nil || request.AfterSequence != 0 || request.Limit != 0 {
 				err = errors.New("unexpected status request fields")
 			}
 		case "apply-bans":
-			if request.AfterSequence != 0 || request.Limit != 0 || request.ExpectedGeneration == nil {
-				err = errors.New("apply-bans requires expectedGeneration and processPaths only")
+			if request.AfterSequence != 0 || request.Limit != 0 || request.ExpectedGeneration == nil || request.ExpectedInstanceID == nil {
+				err = errors.New("apply-bans requires expectedInstanceId, expectedGeneration and processPaths only")
+			} else if *request.ExpectedInstanceID != s.instanceID {
+				err = errors.New("native daemon instance changed; reload before applying")
 			} else if !s.readyLocked() {
 				err = errors.New("native queues and owned table are not ready; policy was not changed")
 			} else if *request.ExpectedGeneration != s.policy.Generation {
@@ -167,7 +170,7 @@ func (s *adapterState) handle(request Request) Response {
 				}
 			}
 		case "events":
-			if request.ExpectedGeneration != nil || request.ProcessPaths != nil || request.Limit > 256 || request.AfterSequence > s.eventSequence {
+			if request.ExpectedGeneration != nil || request.ExpectedInstanceID != nil || request.ProcessPaths != nil || request.Limit > 256 || request.AfterSequence > s.eventSequence {
 				err = errors.New("invalid events cursor or limit; reset cursor when instanceId changes")
 			}
 		default:

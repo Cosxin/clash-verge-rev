@@ -27,8 +27,8 @@
   "capabilities": {
     "title": "实际可用能力",
     "nativeFirewall": "按应用防火墙",
-    "perAppRouting": "强制按应用路由",
-    "wholeSystemMonitor": "全系统监控",
+    "perAppRouting": "全设备按应用路由",
+    "wholeSystemMonitor": "全设备网络监控",
     "killSwitch": "已验证的断网保护",
     "coreHistory": "mihomo 采样历史",
     "note": "代理或 TUN 正在运行，并不代表具备这些原生安全保证。"
@@ -119,7 +119,7 @@
     "title": "观察到的核心连接",
     "coverage": "仅核心、采样且不完整。不包含直连覆盖或原生决策。连接从快照消失并不能证明精确的关闭时间。",
     "search": "搜索应用、目标或路由",
-    "empty": "暂无保存的观察记录。请在概览中启用核心历史记录。",
+    "empty": "暂无保存的观察记录。请在 Settings（设置）中启用部分连接历史记录。",
     "firstSeen": "首次观察",
     "lastSeen": "最近观察",
     "application": "应用",

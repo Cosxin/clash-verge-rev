@@ -215,7 +215,11 @@ pub async fn set_app_ban(
         process_paths: before.process_paths.clone(),
     }
     .replace(process_path, blocked, expected_generation)?;
-    let request = json!({"policy": policy, "expectedGeneration": expected_generation});
+    let request = json!({
+        "policy": policy,
+        "expectedGeneration": expected_generation,
+        "expectedInstanceId": expected_instance_id,
+    });
     let acknowledgement = parse_status(exchange("apply-bans", request).await?)?;
     if !acknowledgement.can_apply_bans()
         || acknowledgement.instance_id != before.instance_id

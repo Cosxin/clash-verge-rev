@@ -5,6 +5,24 @@
 #import <Security/Security.h>
 #include <bsm/libbsm.h>
 #include <netinet/in.h>
+#include <stdio.h>
+
+// Called while policyLock is held; a generation reused by a restarted
+// provider must not authorize a request addressed to its predecessor.
+static NSString *NCValidateBanRequest(NSDictionary *request, NSString *instance, uint64_t current) {
+    id expectedInstance = request[@"expectedInstanceId"];
+    if (![expectedInstance isKindOfClass:NSString.class] || [expectedInstance length] == 0
+        || [expectedInstance lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > 128
+        || ![expectedInstance isEqual:instance]) return @"Native provider instance changed; refresh before applying";
+    NSString *error = NCValidatePolicy(request[@"policy"]);
+    if (error) return error;
+    if (!NCInteger(request[@"expectedGeneration"])) return @"Invalid expected native ban generation";
+    uint64_t expected = [request[@"expectedGeneration"] unsignedLongLongValue];
+    if (expected != current || expected == UINT64_MAX
+        || [request[@"policy"][@"generation"] unsignedLongLongValue] != expected + 1)
+        return @"Native ban generation changed; refresh before applying";
+    return nil;
+}
 
 static NSDictionary *NCIdentity(NEFilterFlow *flow) {
     NSData *token = flow.sourceAppAuditToken;
@@ -129,14 +147,11 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
     NSString *error = nil;
     if (![command isKindOfClass:NSString.class]) error = @"Invalid native command";
     else if ([command isEqual:@"status"] && request.count == 1) { reply(NCEncode([self status])); return; }
-    else if ([command isEqual:@"apply-bans"] && request.count == 3) {
+    else if ([command isEqual:@"apply-bans"] && request.count == 4) {
         @synchronized (self.policyLock) {
             NSDictionary *policy = request[@"policy"];
-            error = NCValidatePolicy(policy);
-            uint64_t expected = [request[@"expectedGeneration"] unsignedLongLongValue];
             uint64_t current = [self.policy[@"generation"] unsignedLongLongValue];
-            if (!error && (!NCInteger(request[@"expectedGeneration"]) || expected != current || expected == UINT64_MAX
-                || [policy[@"generation"] unsignedLongLongValue] != expected + 1)) error = @"Native ban generation changed; refresh before applying";
+            error = NCValidateBanRequest(request, self.instance, current);
             if (!error && self.failure) error = self.failure;
             if (!error && !self.active) error = @"Native filter is not active";
             if (!error) {
@@ -227,6 +242,39 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
 }
 @end
 
+#ifdef NC_PROVIDER_SELF_TEST
+// Pure validation only: no provider construction, XPC, policy I/O or filter
+// activation. Compile this entry point separately for the request-CAS tests.
+int main(int argc, char **argv) {
+    @autoreleasepool {
+        NSDictionary *request = @{@"command":@"apply-bans",@"expectedInstanceId":@"current-provider",
+            @"expectedGeneration":@7,@"policy":@{@"schemaVersion":@1,@"generation":@8,@"processPaths":@[]}};
+        BOOL valid = NCValidateBanRequest(request, @"current-provider", 7) == nil;
+        valid = valid && NCValidateBanRequest(request, @"replacement-provider", 7) != nil;
+        for (id instance in @[@"",@42,NSNull.null,[@"x" stringByPaddingToLength:129 withString:@"x" startingAtIndex:0]]) {
+            NSMutableDictionary *invalid = [request mutableCopy];
+            invalid[@"expectedInstanceId"] = instance;
+            valid = valid && NCValidateBanRequest(invalid, @"current-provider", 7) != nil;
+        }
+        NSMutableDictionary *missing = [request mutableCopy];
+        [missing removeObjectForKey:@"expectedInstanceId"];
+        valid = valid && NCValidateBanRequest(missing, @"current-provider", 7) != nil;
+        valid = valid && NCValidateBanRequest(request, @"current-provider", 8) != nil;
+        for (id generation in @[@YES,@{},NSNull.null]) {
+            NSMutableDictionary *invalid = [request mutableCopy];
+            invalid[@"expectedGeneration"] = generation;
+            valid = valid && NCValidateBanRequest(invalid, @"current-provider", 7) != nil;
+        }
+        NSMutableDictionary *wrongNext = [request mutableCopy];
+        wrongNext[@"policy"] = @{@"schemaVersion":@1,@"generation":@7,@"processPaths":@[]};
+        valid = valid && NCValidateBanRequest(wrongNext, @"current-provider", 7) != nil;
+        NSData *result = NCEncode(@{@"schemaVersion":@1,@"ok":@(valid),@"nativeOperationsPerformed":@NO});
+        fwrite(result.bytes, 1, result.length, stdout);
+        fputc('\n', stdout);
+        return valid ? 0 : 1;
+    }
+}
+#else
 int main(int argc, char **argv) {
     @autoreleasepool {
         [NEProvider startSystemExtensionMode];
@@ -234,3 +282,4 @@ int main(int argc, char **argv) {
     }
     return 0;
 }
+#endif

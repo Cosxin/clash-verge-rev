@@ -17,6 +17,9 @@ int main(int argc, char **argv) {
             valid = valid && NCValidatePolicy(@{@"schemaVersion":@1,@"generation":@1,@"processPaths":@[@"/usr/bin/../curl"]}) != nil;
             valid = valid && NCValidatePolicy(@{@"schemaVersion":@1,@"generation":@YES,@"processPaths":@[]}) != nil;
             valid = valid && NCValidatePolicy(@{@"schemaVersion":@1,@"generation":@1,@"processPaths":@[@"/usr/bin/curl",@"/usr/bin/curl"]}) != nil;
+            NSDictionary *request = @{@"expectedInstanceId":@"current-provider",@"expectedGeneration":@0,
+                @"policy":@{@"schemaVersion":@1,@"generation":@1,@"processPaths":@[]}};
+            valid = valid && [NCDecode(NCEncode(request))[@"expectedInstanceId"] isEqual:request[@"expectedInstanceId"]];
             NCPrint(@{@"schemaVersion":@1,@"ok":@(valid),@"nativeOperationsPerformed":@NO});
             return valid ? 0 : 1;
         }

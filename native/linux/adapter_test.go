@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"net/netip"
@@ -68,7 +69,8 @@ func TestNativeBanCASReadinessBothDirectionsAndBoundedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	generation := uint64(0)
-	request := Request{SchemaVersion: 1, Command: "apply-bans", ExpectedGeneration: &generation, ProcessPaths: []string{"/usr/bin/blocked"}}
+	instance := state.instanceID
+	request := Request{SchemaVersion: 1, Command: "apply-bans", ExpectedGeneration: &generation, ExpectedInstanceID: &instance, ProcessPaths: []string{"/usr/bin/blocked"}}
 	state.queueHealthy = true
 	if state.handle(request).OK {
 		t.Fatal("queue binding alone must not allow native application")
@@ -127,6 +129,59 @@ func TestNativeBanCASReadinessBothDirectionsAndBoundedEvents(t *testing.T) {
 		if decodeJSON(strings.NewReader(invalid), &policy) == nil {
 			t.Fatal("incomplete native policy must not initialize permissive known-app behavior")
 		}
+	}
+}
+
+func TestNativeBanCASRejectsRestartedOrMissingInstanceWithoutPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bans.json")
+	state, err := newState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.queueHealthy, state.tableInstalled, state.tableChecked = true, true, time.Now()
+	generation, instance := uint64(0), state.instanceID
+	request := Request{SchemaVersion: 1, Command: "apply-bans", ExpectedGeneration: &generation, ExpectedInstanceID: &instance, ProcessPaths: []string{"/usr/bin/blocked"}}
+	if response := state.handle(request); !response.OK {
+		t.Fatalf("initial instance-CAS failed: %+v", response)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := newState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.queueHealthy, restarted.tableInstalled, restarted.tableChecked = true, true, time.Now()
+	if restarted.instanceID == instance || restarted.policy.Generation != 1 {
+		t.Fatal("restart fixture must retain generation and change instance")
+	}
+	generation = 1
+	request.ProcessPaths = []string{}
+	for _, expected := range []*string{&instance, nil} {
+		request.ExpectedInstanceID = expected
+		if response := restarted.handle(request); response.OK || response.Generation != 1 || len(response.ProcessPaths) != 1 {
+			t.Fatalf("same-generation stale/missing instance changed policy: %+v", response)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(before, after) {
+			t.Fatalf("rejected instance changed persisted native bans: %v", err)
+		}
+	}
+	for _, input := range []string{
+		`{"schemaVersion":1,"command":"apply-bans","expectedGeneration":1,"processPaths":[]}`,
+		`{"schemaVersion":1,"command":"apply-bans","expectedGeneration":1,"expectedInstanceId":null,"processPaths":[]}`,
+		`{"schemaVersion":1,"command":"apply-bans","expectedGeneration":1,"expectedInstanceId":7,"processPaths":[]}`,
+	} {
+		var decoded Request
+		if decodeJSON(strings.NewReader(input), &decoded) == nil {
+			t.Fatal("native mutation accepted missing/non-string instance schema")
+		}
+	}
+	instance = restarted.instanceID
+	request.ExpectedInstanceID = &instance
+	if response := restarted.handle(request); !response.OK || response.Generation != 2 || len(response.ProcessPaths) != 0 {
+		t.Fatalf("fresh instance-CAS did not acknowledge replacement: %+v", response)
 	}
 }
 

@@ -24,6 +24,7 @@ import { NetworkAppRoutes } from '@/components/network/network-app-routes'
 import { NetworkHistory } from '@/components/network/network-history'
 import { NetworkOverview } from '@/components/network/network-overview'
 import { NetworkPolicyEditor } from '@/components/network/network-policy-editor'
+import { useRetainedNetworkSnapshot } from '@/hooks/use-retained-network-snapshot'
 import { useVisibility } from '@/hooks/use-visibility'
 import { getNetworkWorkspace } from '@/services/network-control'
 import { errorDetail } from '@/services/notice-service'
@@ -33,17 +34,14 @@ const NetworkPage = () => {
   const { t } = useTranslation()
   const visible = useVisibility()
   const [tab, setTab] = useState<'apps' | 'traffic' | 'settings'>('apps')
-  const {
-    data: workspace,
-    error,
-    isFetching,
-  } = useQuery({
+  const { data, error, isFetching } = useQuery({
     queryKey: ['getNetworkWorkspace'],
     queryFn: getNetworkWorkspace,
     enabled: visible,
     refetchInterval: 5000,
     retry: 1,
   })
+  const workspace = useRetainedNetworkSnapshot(data)
   const refresh = useCallback(async () => {
     await revalidateQuery(['getNetworkWorkspace'])
   }, [])

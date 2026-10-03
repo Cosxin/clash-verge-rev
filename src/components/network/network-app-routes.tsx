@@ -30,6 +30,7 @@ import { useLockFn } from 'ahooks'
 import { useState } from 'react'
 
 import { BaseDialog } from '@/components/base'
+import { useRetainedNetworkSnapshot } from '@/hooks/use-retained-network-snapshot'
 import {
   applyNetworkAppRoutes,
   getNetworkAppRoutes,
@@ -725,6 +726,7 @@ export const NetworkAppRoutes = ({ enabled = true }: Props) => {
     refetchInterval: 5000,
     retry: 1,
   })
+  const workspace = useRetainedNetworkSnapshot(data)
   return (
     <Stack spacing={2}>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -738,8 +740,8 @@ export const NetworkAppRoutes = ({ enabled = true }: Props) => {
         </Button>
       </Box>
       {error && <Alert severity="error">{errorDetail(error)}</Alert>}
-      {!data && isFetching && <LinearProgress />}
-      {data && <AppRoutesEditor workspace={data} refetch={refetch} />}
+      {!workspace && isFetching && <LinearProgress />}
+      {workspace && <AppRoutesEditor workspace={workspace} refetch={refetch} />}
     </Stack>
   )
 }

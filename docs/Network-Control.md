@@ -2,6 +2,8 @@
 
 The **Network** page opens on **Apps**, with per-application routing and native ban controls. **Traffic** shows source-specific connection history. **Settings** contains recording controls and a collapsed advanced draft-policy editor. Draft policy previews remain observe-only. Native controls are unavailable without an installed, authenticated adapter; the source implementation is not yet a qualified replacement for an installed firewall or VPN kill switch.
 
+The monitoring goal is device-wide **network flow** visibility, not file, screen, keyboard or general computer-activity monitoring. Captured flows can identify an executable, source/destination, server address or observed hostname, protocol, timing and byte counts. They do not reveal encrypted message contents or establish what local information an application collected. No observation is not proof of no traffic: capture coverage and recording gaps must be considered.
+
 ## Application routing
 
 App routing shows saved assignments and currently observed, unassigned applications together. Choose a server or proxy group for an executable, or let it use the default. A file/application picker also accepts apps that are not running. On macOS, selecting an `.app` resolves its main executable; helper processes have separate executable identities and may need separate assignments. Options come from the active profile and running core. Assignments use canonical executable paths and engine-inferred identity, not code-signing identity. Mihomo matches process paths case-insensitively, so potentially overlapping Unicode case identities are conservatively rejected even on Unix; this validation can be stricter than the core's matching.

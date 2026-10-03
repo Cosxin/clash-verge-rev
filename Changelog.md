@@ -5,7 +5,9 @@
 
 - 修复读屏软件将普通模式下的侧边栏导航项播报为不可用的可拖拽控件的问题
 - 修复订阅包含自定义 DNS 时，确认开启的 DNS 覆写在重启应用后被自动关闭的问题
-- Preserve unsaved Network policy edits when a newer saved generation is refreshed; reject stale saves without losing the draft.
+- Preserve unsaved Network edits across refreshes, tab changes and window hiding; reject stale saves without losing the draft.
+- Reject stale app-ban confirmations before a restarted native provider changes enforcement.
+- Show live route choices only while verified routing rules are active.
 
 **🖥️ Windows**
 

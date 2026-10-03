@@ -46,6 +46,19 @@ impl AppBanPolicy {
 pub struct ApplyRequest {
     pub policy: AppBanPolicy,
     pub expected_generation: u64,
+    pub expected_instance_id: String,
+}
+
+impl ApplyRequest {
+    pub fn validate(&self, instance: &str, generation: u64) -> Result<(), String> {
+        if self.expected_instance_id != instance {
+            return Err("Native service instance changed; reload before saving".into());
+        }
+        if self.expected_generation != generation {
+            return Err("Installed app-ban generation changed; reload before saving".into());
+        }
+        self.policy.validate(self.expected_generation)
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -63,6 +76,27 @@ fn default_limit() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reject_restarted_or_missing_instance_at_same_generation() -> Result<(), Box<dyn std::error::Error>> {
+        let mut request: ApplyRequest = serde_json::from_value(serde_json::json!({
+            "policy":{"schemaVersion":1,"generation":2,"processPaths":[]},
+            "expectedGeneration":1,"expectedInstanceId":"original-service"
+        }))?;
+        assert!(request.validate("original-service", 1).is_ok());
+        assert!(request.validate("restarted-service", 1).is_err());
+        request.expected_instance_id = "restarted-service".to_owned();
+        assert!(request.validate("restarted-service", 1).is_ok());
+        assert!(request.validate("restarted-service", 2).is_err());
+        for input in [
+            serde_json::json!({"policy":{"schemaVersion":1,"generation":2,"processPaths":[]},"expectedGeneration":1}),
+            serde_json::json!({"policy":{"schemaVersion":1,"generation":2,"processPaths":[]},"expectedGeneration":1,"expectedInstanceId":null}),
+            serde_json::json!({"policy":{"schemaVersion":1,"generation":2,"processPaths":[]},"expectedGeneration":1,"expectedInstanceId":7}),
+        ] {
+            assert!(serde_json::from_value::<ApplyRequest>(input).is_err());
+        }
+        Ok(())
+    }
+
     #[test]
     fn reject_stale_and_non_executable_selectors() {
         let mut policy = AppBanPolicy {
