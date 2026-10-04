@@ -234,9 +234,9 @@ pub struct IVergeTheme {
 }
 
 impl IVerge {
-    #[cfg(not(feature = "network-dev"))]
+    #[cfg(not(feature = "network-control"))]
     pub const VALID_CLASH_CORES: &'static [&'static str] = &["verge-mihomo", "verge-mihomo-alpha"];
-    #[cfg(feature = "network-dev")]
+    #[cfg(feature = "network-control")]
     pub const VALID_CLASH_CORES: &'static [&'static str] = &["verge-mihomo"];
 
     pub async fn validate_and_fix_config() -> Result<()> {

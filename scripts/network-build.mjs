@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url'
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const target = args[0]
+// --user builds the NetworkControl app; the default stays the isolated developer build.
+const userFlavor = args.includes('--user')
+const tauriConfig = userFlavor
+  ? 'src-tauri/tauri.network.conf.json'
+  : 'src-tauri/tauri.network-dev.conf.json'
+const feature = userFlavor ? 'network-control' : 'network-dev'
 const pins = JSON.parse(
   await fs.readFile(path.join(repo, 'scripts/network-assets.json'), 'utf8'),
 )
@@ -26,15 +32,13 @@ const manifest = await fs.readFile(
   path.join(repo, 'src-tauri/Cargo.toml'),
   'utf8',
 )
-if (!/^network-dev\s*=/m.test(manifest))
-  throw new Error(
-    'The isolated network-dev Rust feature is required before building.',
-  )
+if (!new RegExp(`^${feature}\\s*=`, 'm').test(manifest))
+  throw new Error(`The ${feature} Rust feature is required before building.`)
 execFileSync(
   process.execPath,
   [
     path.join(repo, 'scripts/network-prebuild.mjs'),
-    ...args.filter((arg) => !['--bundle', '--debug'].includes(arg)),
+    ...args.filter((arg) => !['--bundle', '--debug', '--user'].includes(arg)),
   ],
   { cwd: repo, stdio: 'inherit' },
 )
@@ -75,9 +79,9 @@ const buildArgs = [
   '--target',
   target,
   '--config',
-  'src-tauri/tauri.network-dev.conf.json',
+  tauriConfig,
   '--features',
-  'network-dev',
+  feature,
 ]
 buildArgs.push(...(bundle ? ['--bundles', 'app'] : ['--no-bundle']))
 if (args.includes('--debug')) buildArgs.push('--debug')
@@ -102,10 +106,7 @@ execFileSync(command, buildArgs, {
 })
 if (bundle) {
   const config = JSON.parse(
-    await fs.readFile(
-      path.join(repo, 'src-tauri/tauri.network-dev.conf.json'),
-      'utf8',
-    ),
+    await fs.readFile(path.join(repo, tauriConfig), 'utf8'),
   )
   const baseConfig = JSON.parse(
     await fs.readFile(path.join(repo, 'src-tauri/tauri.conf.json'), 'utf8'),
@@ -166,5 +167,7 @@ if (bundle) {
   }
 }
 console.log(
-  'Unlaunched developer build complete. No Developer ID signature/notarization; not qualified for distribution. Native privileged adapters remain unavailable.',
+  userFlavor
+    ? 'NetworkControl build complete. Unsigned and not notarized: macOS asks for confirmation on first launch. Native privileged adapters remain unavailable.'
+    : 'Unlaunched developer build complete. No Developer ID signature/notarization; not qualified for distribution. Native privileged adapters remain unavailable.',
 )

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { type DialogRef, Switch, TooltipIcon } from '@/components/base'
 import { SysproxyViewer } from '@/components/setting/mods/sysproxy-viewer'
 import { TunViewer } from '@/components/setting/mods/tun-viewer'
+import { useBuildCapabilities } from '@/hooks/use-build-capabilities'
 import { useServiceUninstaller } from '@/hooks/use-service-uninstaller'
 import { useSystemProxyState } from '@/hooks/use-system-proxy-state'
 import { useSystemState } from '@/hooks/use-system-state'
@@ -138,6 +139,7 @@ const ProxyControlSwitches = ({
   const { indicator: systemProxyIndicator, toggleSystemProxy } =
     useSystemProxyState()
   const { runState, isTunModeAvailable, isLoading } = useSystemState()
+  const { hostLocked, flavor, unavailable } = useBuildCapabilities()
   // Offer to uninstall only a service that is actually there and working.
   const isServiceInstallReady = runState.serviceUsable
 
@@ -185,6 +187,7 @@ const ProxyControlSwitches = ({
         <SwitchRow
           label={t('settings.sections.proxyControl.fields.systemProxy')}
           active={systemProxyIndicator}
+          disabled={hostLocked}
           infoTitle={t('settings.sections.proxyControl.tooltips.systemProxy')}
           onInfoClick={() => sysproxyRef.current?.open()}
           onToggle={handleSystemProxyToggle}
@@ -197,6 +200,7 @@ const ProxyControlSwitches = ({
         <SwitchRow
           label={t('settings.sections.proxyControl.fields.tunMode')}
           active={(enable_tun_mode && isTunModeAvailable) || false}
+          disabled={hostLocked}
           infoTitle={t('settings.sections.proxyControl.tooltips.tunMode')}
           onInfoClick={() => tunRef.current?.open()}
           onToggle={handleTunToggle}
@@ -229,6 +233,23 @@ const ProxyControlSwitches = ({
         />
       )}
 
+      {hostLocked && (
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'block', px: 1 }}
+        >
+          {flavor
+            ? t('settings.sections.proxyControl.tooltips.hostChangesDisabled')
+            : unavailable
+              ? t(
+                  'settings.sections.proxyControl.tooltips.capabilitiesUnavailable',
+                )
+              : t(
+                  'settings.sections.proxyControl.tooltips.capabilitiesLoading',
+                )}
+        </Typography>
+      )}
       <SysproxyViewer ref={sysproxyRef} />
       <TunViewer ref={tunRef} />
     </Box>

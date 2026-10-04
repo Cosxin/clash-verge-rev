@@ -138,7 +138,7 @@ impl NetworkState {
             schema_version: 1,
             policy: self.store.policy.clone(),
             capabilities: NetworkCapabilities {
-                native_firewall: self.native_status.can_apply_bans(),
+                native_firewall: !cfg!(feature = "network-control") && self.native_status.can_apply_bans(),
                 per_app_routing: false,
                 whole_system_monitor: false,
                 kill_switch: false,
@@ -159,7 +159,7 @@ impl NetworkState {
             recording_enabled: self.store.recording_enabled,
             background_recording: self.background_recording(),
             background_recording_reason: self.background_recording_reason(),
-            background_recording_available: !cfg!(feature = "network-dev")
+            background_recording_available: !cfg!(feature = "network-control")
                 && self.native_status.authenticated
                 && self.native_status.active
                 && self.native_status.monitoring

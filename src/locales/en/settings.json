@@ -33,7 +33,10 @@
       "tooltips": {
         "systemProxy": "Enable to modify the operating system's proxy settings. If enabling fails, modify the operating system's proxy settings manually",
         "tunMode": "Tun (Virtual NIC) mode: Captures all system traffic, when enabled, there is no need to enable system proxy.",
-        "tunUnavailable": "TUN requires Service Mode or Admin Mode"
+        "tunUnavailable": "TUN requires Service Mode or Admin Mode",
+        "hostChangesDisabled": "Connecting is turned off in this developer build. Use the NetworkControl app to connect.",
+        "capabilitiesLoading": "Checking available connection controls…",
+        "capabilitiesUnavailable": "Connection controls could not be checked. Reopen the app or check diagnostics."
       },
       "actions": {
         "installService": "Install Service",

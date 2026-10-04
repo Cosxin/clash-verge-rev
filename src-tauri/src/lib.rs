@@ -158,6 +158,7 @@ mod app_init {
             cmd::restart_core,
             cmd::upgrade_clash_core,
             cmd::get_runtime_state,
+            cmd::get_build_capabilities,
             cmd::get_pending_failures,
             cmd::entry_lightweight_mode,
             cmd::install_service,

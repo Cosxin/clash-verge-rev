@@ -226,7 +226,7 @@ fn journal_scope<'a>(
     Ok(journal)
 }
 
-#[cfg(feature = "network-dev")]
+#[cfg(feature = "network-control")]
 #[allow(clippy::unused_async)]
 pub async fn journal_recording(
     _: &NativeAdapterStatus,
@@ -237,7 +237,7 @@ pub async fn journal_recording(
     Err("NETWORK_DEV_HOST_MUTATION_DISABLED: background recording requires a qualified native build".to_owned())
 }
 
-#[cfg(not(feature = "network-dev"))]
+#[cfg(not(feature = "network-control"))]
 pub async fn journal_recording(
     status: &NativeAdapterStatus,
     enabled: bool,
@@ -322,7 +322,7 @@ pub async fn journal_events(
     Ok(page)
 }
 
-#[cfg(feature = "network-dev")]
+#[cfg(feature = "network-control")]
 #[allow(clippy::unused_async)]
 pub async fn journal_ack(_: &NativeAdapterStatus, _: &NativeJournalEnrollment) -> Result<(), String> {
     Err(
@@ -331,7 +331,7 @@ pub async fn journal_ack(_: &NativeAdapterStatus, _: &NativeJournalEnrollment) -
     )
 }
 
-#[cfg(not(feature = "network-dev"))]
+#[cfg(not(feature = "network-control"))]
 pub async fn journal_ack(status: &NativeAdapterStatus, enrollment: &NativeJournalEnrollment) -> Result<(), String> {
     journal_scope(status, enrollment)?;
     let value = exchange(
@@ -351,13 +351,13 @@ pub async fn journal_ack(status: &NativeAdapterStatus, enrollment: &NativeJourna
     Ok(())
 }
 
-#[cfg(feature = "network-dev")]
+#[cfg(feature = "network-control")]
 #[allow(clippy::unused_async)]
 pub async fn set_app_ban(_: String, _: bool, _: u64, _: String) -> Result<NativeAdapterStatus, String> {
     Err("NETWORK_DEV_HOST_MUTATION_DISABLED: native app bans require a qualified native build".to_owned())
 }
 
-#[cfg(not(feature = "network-dev"))]
+#[cfg(not(feature = "network-control"))]
 pub async fn set_app_ban(
     process_path: String,
     blocked: bool,
@@ -396,6 +396,32 @@ pub async fn set_app_ban(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "network-control")]
+    #[tokio::test]
+    async fn network_control_native_changes_reject_without_a_provider() {
+        let status = NativeAdapterStatus::unavailable("fixture provider unavailable");
+        let enrollment = NativeJournalEnrollment {
+            journal_id: "fixture-journal".into(),
+            recording_epoch: "fixture-epoch".into(),
+            generation: 0,
+            sequence: 0,
+            provider_restarts: 0,
+            producer_instance_id: String::new(),
+            pending: false,
+        };
+        for error in [
+            journal_recording(&status, true, "fixture-epoch", &HistoryLimits::default())
+                .await
+                .err(),
+            set_app_ban("/fixture/application".into(), true, 0, "fixture-instance".into())
+                .await
+                .err(),
+            journal_ack(&status, &enrollment).await.err(),
+        ] {
+            assert!(error.is_some_and(|message| message.starts_with("NETWORK_DEV_HOST_MUTATION_DISABLED:")));
+        }
+    }
 
     #[test]
     fn native_replies_must_be_bounded_versioned_and_explicitly_acknowledged() {

@@ -450,6 +450,15 @@ export const getRuntimeState = async () => {
   return invoke<RunState>('get_runtime_state')
 }
 
+export interface BuildCapabilities {
+  flavor: 'network-dev' | 'network-control' | 'upstream'
+  hostNetworkChanges: boolean
+}
+
+export const getBuildCapabilities = async () => {
+  return invoke<BuildCapabilities>('get_build_capabilities')
+}
+
 export type FailedOperation =
   | 'systemProxyEnable'
   | 'systemProxyDisable'

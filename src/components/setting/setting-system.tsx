@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { DialogRef, Switch, TooltipIcon } from '@/components/base'
 import ProxyControlSwitches from '@/components/shared/proxy-control-switches'
+import { useBuildCapabilities } from '@/hooks/use-build-capabilities'
 import { useVerge } from '@/hooks/use-verge'
 
 import { GuardState } from './mods/guard-state'
@@ -20,6 +21,7 @@ const SettingSystem = ({ onError }: Props) => {
   const { verge, mutateVerge, patchVerge } = useVerge()
 
   const { enable_auto_launch, enable_silent_start } = verge ?? {}
+  const { hostLocked } = useBuildCapabilities()
 
   const sysproxyRef = useRef<DialogRef>(null)
   const tunRef = useRef<DialogRef>(null)
@@ -69,7 +71,7 @@ const SettingSystem = ({ onError }: Props) => {
             }
           }}
         >
-          <Switch edge="end" />
+          <Switch edge="end" disabled={hostLocked} />
         </GuardState>
       </SettingItem>
 

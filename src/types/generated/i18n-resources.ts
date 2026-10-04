@@ -1554,6 +1554,9 @@ export interface TranslationResources {
             installedProxyRestored: string
           }
           tooltips: {
+            capabilitiesLoading: string
+            capabilitiesUnavailable: string
+            hostChangesDisabled: string
             systemProxy: string
             tunMode: string
             tunUnavailable: string

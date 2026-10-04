@@ -8,15 +8,20 @@ use std::{
 };
 use tauri::Manager as _;
 
-#[cfg(all(not(feature = "verge-dev"), not(feature = "network-dev")))]
+#[cfg(all(not(feature = "verge-dev"), not(feature = "network-control")))]
 pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev";
-#[cfg(all(not(feature = "verge-dev"), not(feature = "network-dev")))]
+#[cfg(all(not(feature = "verge-dev"), not(feature = "network-control")))]
 pub static BACKUP_DIR: &str = "clash-verge-rev-backup";
 
-#[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
+#[cfg(all(feature = "verge-dev", not(feature = "network-control")))]
 pub static APP_ID: &str = "io.github.clash-verge-rev.clash-verge-rev.dev";
-#[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
+#[cfg(all(feature = "verge-dev", not(feature = "network-control")))]
 pub static BACKUP_DIR: &str = "clash-verge-rev-backup-dev";
+
+#[cfg(all(feature = "network-control", not(feature = "network-dev")))]
+pub static APP_ID: &str = "io.github.cosxin.network-control";
+#[cfg(all(feature = "network-control", not(feature = "network-dev")))]
+pub static BACKUP_DIR: &str = "network-control-backup";
 
 #[cfg(feature = "network-dev")]
 pub static APP_ID: &str = "io.github.cosxin.network-control.dev";
@@ -224,11 +229,13 @@ fn sidecar_ipc_path_for(
 
     let root = std::ffi::CStr::from_bytes_until_nul(&buffer)
         .map_err(|_| anyhow::anyhow!("macOS per-user temporary directory is not NUL-terminated"))?;
-    #[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
+    #[cfg(all(feature = "verge-dev", not(feature = "network-control")))]
     let filename = "verge-mihomo-dev.sock";
     #[cfg(feature = "network-dev")]
     let filename = "network-mihomo-dev.sock";
-    #[cfg(not(feature = "verge-dev"))]
+    #[cfg(all(feature = "network-control", not(feature = "network-dev")))]
+    let filename = "network-mihomo.sock";
+    #[cfg(all(not(feature = "verge-dev"), not(feature = "network-control")))]
     let filename = "verge-mihomo.sock";
     let path = PathBuf::from(OsStr::from_bytes(root.to_bytes())).join(filename);
 
@@ -251,7 +258,7 @@ fn sidecar_ipc_path_for(_app_root: &std::path::Path, identity: &clash_verge_serv
 #[cfg(any(windows, test))]
 fn sidecar_pipe_name(identity: &clash_verge_service_ipc::OwnerIdentity, is_dev: bool) -> String {
     let flavor = if is_dev { "dev" } else { "release" };
-    let product = if cfg!(feature = "network-dev") {
+    let product = if cfg!(feature = "network-control") {
         "network-control"
     } else {
         "verge-mihomo"
@@ -297,11 +304,13 @@ mod ipc_tests {
 
         assert!(!path.starts_with(app_root));
         assert!(path.as_os_str().as_bytes().len() < 104);
-        #[cfg(all(feature = "verge-dev", not(feature = "network-dev")))]
+        #[cfg(all(feature = "verge-dev", not(feature = "network-control")))]
         assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo-dev.sock")));
         #[cfg(feature = "network-dev")]
         assert_eq!(path.file_name(), Some(OsStr::new("network-mihomo-dev.sock")));
-        #[cfg(not(feature = "verge-dev"))]
+        #[cfg(all(feature = "network-control", not(feature = "network-dev")))]
+        assert_eq!(path.file_name(), Some(OsStr::new("network-mihomo.sock")));
+        #[cfg(all(not(feature = "verge-dev"), not(feature = "network-control")))]
         assert_eq!(path.file_name(), Some(OsStr::new("verge-mihomo.sock")));
         assert_eq!(path, sidecar_ipc_path_for(Path::new("/different/root"), &identity)?);
         assert!(path.parent().is_some_and(Path::is_dir));
@@ -326,7 +335,7 @@ mod ipc_tests {
             path,
             Path::new(&format!(
                 r"\\.\pipe\{}-sidecar-{}-{}",
-                if cfg!(feature = "network-dev") {
+                if cfg!(feature = "network-control") {
                     "network-control"
                 } else {
                     "verge-mihomo"
@@ -365,7 +374,7 @@ mod windows_pipe_name_tests {
             sid: "S-1-5-21-1000".to_owned(),
         };
         let owner_key = clash_verge_service_ipc::owner_key(&identity);
-        let product = if cfg!(feature = "network-dev") {
+        let product = if cfg!(feature = "network-control") {
             "network-control"
         } else {
             "verge-mihomo"
@@ -393,6 +402,15 @@ mod windows_pipe_name_tests {
             config["plugins"]["deep-link"]["desktop"]["schemes"],
             serde_json::json!([])
         );
+        Ok(())
+    }
+
+    #[cfg(all(feature = "network-control", not(feature = "network-dev")))]
+    #[test]
+    fn network_control_identity_matches_the_user_bundle() -> anyhow::Result<()> {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.network.conf.json"))?;
+        assert_eq!(config["identifier"], super::APP_ID);
+        assert_eq!(crate::config::IVerge::VALID_CLASH_CORES, &["verge-mihomo"]);
         Ok(())
     }
 }

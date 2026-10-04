@@ -1,0 +1,30 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "NetworkControl",
+  "mainBinaryName": "network-control",
+  "identifier": "io.github.cosxin.network-control",
+  "bundle": {
+    "publisher": "Cosxin",
+    "longDescription": "Connect through your proxy servers, route individual apps and review connection history with the Mihomo core. Native firewall adapters require a separately qualified installation.",
+    "shortDescription": "NetworkControl",
+    "externalBin": ["sidecar/verge-mihomo"],
+    "resources": ["resources"],
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "signingIdentity": null,
+      "infoPlist": null,
+      "exceptionDomain": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": []
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": ["clash"]
+      }
+    }
+  }
+}
