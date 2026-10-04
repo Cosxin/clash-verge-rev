@@ -76,6 +76,9 @@ export interface NetworkWorkspace {
   adapterReason: string
   os: string
   recordingEnabled: boolean
+  backgroundRecording: boolean
+  backgroundRecordingAvailable: boolean
+  backgroundRecordingReason: string
   retentionDays: number
   maxRecords: number
   lastSampleAt: number | null
@@ -139,6 +142,23 @@ export interface NativeAdapterStatus {
   processPaths: string[]
   instanceId: string
   existingFlowBehavior: 'unavailable' | 'drop' | 'new_flows_only'
+  reason: string
+  journal?: NativeJournalStatus | null
+}
+
+export interface NativeJournalStatus {
+  journalId: string
+  generation: number
+  recording: boolean
+  recordingEpoch: string
+  firstSequence: number
+  lastSequence: number
+  acknowledgedSequence: number
+  droppedEvents: number
+  providerRestarts: number
+  retentionDays: number
+  maxRecords: number
+  healthy: boolean
   reason: string
 }
 

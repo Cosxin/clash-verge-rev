@@ -417,6 +417,9 @@ export interface TranslationResources {
         unknown: string
       }
       settings: {
+        backgroundConfirmed: string
+        backgroundUnconfirmed: string
+        confirmBackground: string
         invalidLimits: string
         limitWarning: string
         maxRecords: string

@@ -93,6 +93,19 @@ export function URI_VLESS(line: string): IProxyVlessConfig {
 
   proxy.encryption = params.encryption === 'none' ? '' : params.encryption
 
+  if (Object.prototype.hasOwnProperty.call(params, 'udp')) {
+    proxy.udp = parseBoolOrPresence(params.udp)
+  }
+  const packetEncoding = getIfNotBlank(
+    params.packetEncoding ?? params['packet-encoding'],
+  )
+  if (packetEncoding) {
+    if (!['xudp', 'packetaddr'].includes(packetEncoding)) {
+      throw new Error('Unsupported VLESS packet encoding')
+    }
+    proxy['packet-encoding'] = packetEncoding
+  }
+
   proxy.tls = (params.security && params.security !== 'none') || undefined
   if (isShadowrocket && parseBool(params.tls) === true) {
     proxy.tls = true
@@ -115,6 +128,13 @@ export function URI_VLESS(line: string): IProxyVlessConfig {
     }
     if (params.sid) {
       opts['short-id'] = params.sid
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(params, 'support-x25519mlkem768')
+    ) {
+      opts['support-x25519mlkem768'] = parseBoolOrPresence(
+        params['support-x25519mlkem768'],
+      )
     }
     if (Object.keys(opts).length > 0) {
       proxy['reality-opts'] = opts

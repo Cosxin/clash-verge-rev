@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Kullanılabilir bağlantı kaynaklarını kaydet",
-    "recordingDescription": "Masaüstü işlemi çalışırken isteğe bağlı yerel geçmiş: çekirdek anlık görüntüleri ve kimliği doğrulanmış izleme sağlayıcısının olayları. Kaynakların sayaçları ayrıdır ve kapsamları eksiktir. Çekirdek yazımları toplu yapılır; ani çıkış son 10 saniyenin kaybolmasına neden olabilir. Kayıt yeniden açıldığında, kapalı olduğu sırada biriken yerel olaylar içe aktarılmaz.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

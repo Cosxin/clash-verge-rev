@@ -15,7 +15,7 @@ const bundle = join(output, 'io.github.cosxin.network-control.filter.systemexten
 mkdirSync(join(bundle, 'Contents', 'MacOS'), { recursive: true })
 const args = ['-fobjc-arc', '-mmacosx-version-min=13.0', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter', '-Wno-deprecated-declarations',
   `-DNC_TEAM_ID="${team}"`, `-DNC_OWNER_UID=${owner}`, '-framework', 'Foundation', '-framework', 'Security']
-execFileSync('xcrun', ['clang', ...args, join(root, 'Native.m'), join(root, 'Provider.m'), '-framework', 'NetworkExtension', '-lbsm',
+execFileSync('xcrun', ['clang', ...args, join(root, 'Native.m'), join(root, 'Journal.m'), join(root, 'Provider.m'), '-framework', 'NetworkExtension', '-lbsm', '-lsqlite3',
   '-o', join(bundle, 'Contents', 'MacOS', 'network-control-filter')], { stdio: 'inherit' })
 execFileSync('xcrun', ['clang', ...args, join(root, 'Native.m'), join(root, 'Controller.m'), '-o', join(output, 'network-control-native')], { stdio: 'inherit' })
 const template = readFileSync(join(root, 'Info.plist'), 'utf8')

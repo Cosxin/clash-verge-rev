@@ -1,4 +1,6 @@
-use clash_verge_network::{AppBanPolicy, NativeAdapterStatus};
+use clash_verge_network::{
+    AppBanPolicy, HistoryLimits, NativeAdapterStatus, NativeJournalEnrollment, NativeJournalPage,
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -148,6 +150,9 @@ fn parse_status(value: Value) -> Result<NativeAdapterStatus, String> {
         process_paths: status.process_paths.clone(),
     })
     .validate()?;
+    if let Some(journal) = &status.journal {
+        journal.validate()?;
+    }
     Ok(status)
 }
 
@@ -195,6 +200,155 @@ fn parse_events(value: Value, after_sequence: u64) -> Result<NativeEvents, Strin
         return Err("Native event cursor is not acknowledged".to_owned());
     }
     Ok(batch)
+}
+
+fn journal_scope<'a>(
+    status: &'a NativeAdapterStatus,
+    enrollment: &NativeJournalEnrollment,
+) -> Result<&'a clash_verge_network::NativeJournalStatus, String> {
+    enrollment.validate()?;
+    let journal = status
+        .journal
+        .as_ref()
+        .ok_or("Native background history is unavailable")?;
+    journal.validate()?;
+    if !status.authenticated
+        || !status.active
+        || !status.monitoring
+        || !journal.healthy
+        || journal.journal_id != enrollment.journal_id
+        || journal.recording_epoch != enrollment.recording_epoch
+        || journal.generation != enrollment.generation
+        || enrollment.pending
+    {
+        return Err("Native background recording scope changed; refresh and review recording state".to_owned());
+    }
+    Ok(journal)
+}
+
+#[cfg(feature = "network-dev")]
+#[allow(clippy::unused_async)]
+pub async fn journal_recording(
+    _: &NativeAdapterStatus,
+    _: bool,
+    _: &str,
+    _: &HistoryLimits,
+) -> Result<NativeAdapterStatus, String> {
+    Err("NETWORK_DEV_HOST_MUTATION_DISABLED: background recording requires a qualified native build".to_owned())
+}
+
+#[cfg(not(feature = "network-dev"))]
+pub async fn journal_recording(
+    status: &NativeAdapterStatus,
+    enabled: bool,
+    epoch: &str,
+    limits: &HistoryLimits,
+) -> Result<NativeAdapterStatus, String> {
+    limits.validate()?;
+    let journal = status
+        .journal
+        .as_ref()
+        .ok_or("Native background history is unavailable")?;
+    journal.validate()?;
+    (NativeJournalEnrollment {
+        journal_id: journal.journal_id.clone(),
+        recording_epoch: epoch.to_owned(),
+        generation: journal.generation,
+        sequence: journal.last_sequence,
+        provider_restarts: journal.provider_restarts,
+        producer_instance_id: String::new(),
+        pending: true,
+    })
+    .validate()?;
+    if !status.authenticated || !status.active || !status.monitoring || !journal.healthy {
+        return Err("Native background recording is not healthy and authenticated".to_owned());
+    }
+    let request = json!({
+        "expectedInstanceId": status.instance_id,
+        "expectedJournalId": journal.journal_id,
+        "expectedGeneration": journal.generation,
+        "enabled": enabled,
+        "recordingEpoch": epoch,
+        "retentionDays": limits.retention_days,
+        "maxRecords": limits.max_records,
+    });
+    let acknowledgement = parse_status(exchange("journal-recording", request).await?)?;
+    let accepted = acknowledgement
+        .journal
+        .as_ref()
+        .ok_or("Native recording acknowledgement is missing")?;
+    if acknowledgement.instance_id != status.instance_id
+        || !acknowledgement.authenticated
+        || !acknowledgement.active
+        || !accepted.healthy
+        || accepted.journal_id != journal.journal_id
+        || accepted.generation
+            != journal
+                .generation
+                .checked_add(1)
+                .ok_or("Native journal generation exhausted")?
+        || accepted.recording != enabled
+        || accepted.recording_epoch != epoch
+        || accepted.retention_days != limits.retention_days
+        || accepted.max_records != limits.max_records
+        || accepted.last_sequence < journal.last_sequence
+    {
+        return Err("Native recording acknowledgement did not match the requested durable scope".to_owned());
+    }
+    Ok(acknowledgement)
+}
+
+pub async fn journal_events(
+    status: &NativeAdapterStatus,
+    enrollment: &NativeJournalEnrollment,
+) -> Result<NativeJournalPage, String> {
+    let journal = journal_scope(status, enrollment)?;
+    if !journal.recording {
+        return Err("Native background recording is disabled".to_owned());
+    }
+    let value = exchange(
+        "journal-events",
+        json!({
+            "expectedInstanceId":status.instance_id,"journalId":enrollment.journal_id,
+            "recordingEpoch":enrollment.recording_epoch,"afterSequence":enrollment.sequence,"limit":256,
+        }),
+    )
+    .await?;
+    let page: NativeJournalPage = serde_json::from_value(value).map_err(|error| error.to_string())?;
+    page.validate(enrollment)?;
+    if page.instance_id != status.instance_id {
+        return Err("Native provider changed during journal read".to_owned());
+    }
+    Ok(page)
+}
+
+#[cfg(feature = "network-dev")]
+#[allow(clippy::unused_async)]
+pub async fn journal_ack(_: &NativeAdapterStatus, _: &NativeJournalEnrollment) -> Result<(), String> {
+    Err(
+        "NETWORK_DEV_HOST_MUTATION_DISABLED: native history acknowledgment requires a qualified native build"
+            .to_owned(),
+    )
+}
+
+#[cfg(not(feature = "network-dev"))]
+pub async fn journal_ack(status: &NativeAdapterStatus, enrollment: &NativeJournalEnrollment) -> Result<(), String> {
+    journal_scope(status, enrollment)?;
+    let value = exchange(
+        "journal-ack",
+        json!({
+            "expectedInstanceId":status.instance_id,"journalId":enrollment.journal_id,
+            "recordingEpoch":enrollment.recording_epoch,"throughSequence":enrollment.sequence,
+        }),
+    )
+    .await?;
+    let acknowledgement = parse_status(value)?;
+    let journal = journal_scope(&acknowledgement, enrollment)?;
+    let acknowledged_through = journal.acknowledged_sequence;
+    if acknowledgement.instance_id != status.instance_id || acknowledged_through < enrollment.sequence {
+        return Err("Native journal has not acknowledged the durably saved cursor".to_owned());
+    }
+    Ok(())
 }
 
 #[cfg(feature = "network-dev")]

@@ -1,5 +1,8 @@
 use crate::{core::handle::Handle, process::AsyncHandler, utils::dirs};
-use clash_verge_network::{FlowSample, HistoryLimits, NativeAdapterStatus, NetworkPolicy, NetworkStore};
+use clash_verge_network::{
+    ConnectionHistory, FlowSample, HistoryLimits, NativeAdapterStatus, NativeJournalEnrollment, NativeJournalPage,
+    NetworkPolicy, NetworkStore,
+};
 use serde::Serialize;
 use std::{
     future::Future,
@@ -67,6 +70,9 @@ pub struct NetworkWorkspace {
     adapter_reason: &'static str,
     os: &'static str,
     recording_enabled: bool,
+    background_recording: bool,
+    background_recording_reason: String,
+    background_recording_available: bool,
     retention_days: u32,
     max_records: usize,
     last_sample_at: Option<u64>,
@@ -148,9 +154,20 @@ impl NetworkState {
             } else {
                 "core_only"
             },
-            adapter_reason: "Draft policy preview, native executable bans, and core-only app routing are separate. Whole-IP monitoring, durable independent history, native app routing and kill-switch qualification are incomplete.",
+            adapter_reason: "Draft policy preview, native executable bans, and core-only app routing are separate. Whole-IP monitoring, cross-platform independent history, native app routing and kill-switch qualification are incomplete.",
             os: std::env::consts::OS,
             recording_enabled: self.store.recording_enabled,
+            background_recording: self.background_recording(),
+            background_recording_reason: self.background_recording_reason(),
+            background_recording_available: !cfg!(feature = "network-dev")
+                && self.native_status.authenticated
+                && self.native_status.active
+                && self.native_status.monitoring
+                && self
+                    .native_status
+                    .journal
+                    .as_ref()
+                    .is_some_and(|journal| journal.healthy),
             retention_days: self.store.limits.retention_days,
             max_records: self.store.limits.max_records,
             last_sample_at: self.last_sample_at,
@@ -190,8 +207,64 @@ impl NetworkState {
     }
 
     pub async fn set_recording(&mut self, enabled: bool) -> Result<(), String> {
+        self.set_recording_with(enabled, |status, enabled, epoch, limits| async move {
+            super::native_firewall::journal_recording(&status, enabled, &epoch, &limits).await
+        })
+        .await
+    }
+
+    pub fn update_native_status(&mut self, status: NativeAdapterStatus) {
+        self.native_status = status;
+    }
+
+    async fn set_recording_with<F, R>(&mut self, enabled: bool, configure: F) -> Result<(), String>
+    where
+        F: FnOnce(NativeAdapterStatus, bool, String, HistoryLimits) -> R,
+        R: Future<Output = Result<NativeAdapterStatus, String>>,
+    {
+        if self.store.recording_enabled == enabled
+            && self
+                .store
+                .native_journal
+                .as_ref()
+                .is_some_and(|enrollment| enrollment.pending)
+        {
+            let status = self.native_status.clone();
+            return self.synchronize_journal_with(&status, configure).await;
+        }
         let mut next = self.store.clone();
         next.recording_enabled = enabled;
+        if let Some(previous) = &self.store.native_journal {
+            let mut intent = previous.clone();
+            if let Some(journal) = &self.native_status.journal
+                && journal.journal_id == previous.journal_id
+                && journal.healthy
+                && self.native_status.authenticated
+                && self.native_status.active
+            {
+                intent.generation = journal.generation;
+                intent.sequence = journal.last_sequence.max(intent.sequence);
+                intent.provider_restarts = journal.provider_restarts.max(intent.provider_restarts);
+            }
+            intent.recording_epoch = nanoid::nanoid!();
+            intent.producer_instance_id.clear();
+            intent.pending = true;
+            next.native_journal = Some(intent);
+        } else if let Some(journal) = &self.native_status.journal
+            && journal.healthy
+            && self.native_status.authenticated
+            && self.native_status.active
+        {
+            next.native_journal = Some(NativeJournalEnrollment {
+                journal_id: journal.journal_id.clone(),
+                recording_epoch: nanoid::nanoid!(),
+                generation: journal.generation,
+                sequence: journal.last_sequence,
+                provider_restarts: journal.provider_restarts,
+                producer_instance_id: String::new(),
+                pending: true,
+            });
+        }
         if !enabled {
             next.history.interrupt(now_ms(), false);
         }
@@ -201,15 +274,273 @@ impl NetworkState {
         self.last_sample_at = None;
         self.sample_error = None;
         self.native_error = None;
+        let status = self.native_status.clone();
+        self.synchronize_journal_with(&status, configure).await
+    }
+
+    fn background_recording(&self) -> bool {
+        self.store.recording_enabled
+            && self
+                .store
+                .native_journal
+                .as_ref()
+                .is_some_and(|enrollment| !enrollment.pending && journal_matches(&self.native_status, enrollment, true))
+    }
+
+    fn background_recording_reason(&self) -> String {
+        if self.background_recording() {
+            return "Authenticated native flow history continues when the desktop exits, within the provider's storage bounds".to_owned();
+        }
+        if self
+            .store
+            .native_journal
+            .as_ref()
+            .is_some_and(|enrollment| enrollment.pending)
+        {
+            return self.native_error.clone().unwrap_or_else(|| {
+                "Native recording change is pending; provider capture may continue until a durable acknowledgment"
+                    .to_owned()
+            });
+        }
+        if let Some(enrollment) = &self.store.native_journal {
+            return self.native_error.clone().unwrap_or_else(|| {
+                if journal_matches(&self.native_status, enrollment, false) {
+                    "Native background recording is off".to_owned()
+                } else {
+                    "Native recording state is unconfirmed; the provider may retain its previous recording setting"
+                        .to_owned()
+                }
+            });
+        }
+        "This workspace has not opted into an authenticated durable native journal".to_owned()
+    }
+
+    async fn synchronize_journal_with<F, R>(&mut self, status: &NativeAdapterStatus, configure: F) -> Result<(), String>
+    where
+        F: FnOnce(NativeAdapterStatus, bool, String, HistoryLimits) -> R,
+        R: Future<Output = Result<NativeAdapterStatus, String>>,
+    {
+        let Some(enrollment) = self.store.native_journal.clone() else {
+            return Ok(());
+        };
+        let result = async {
+            enrollment.validate()?;
+            let journal = status
+                .journal
+                .as_ref()
+                .ok_or("Native journal unavailable; recording change is unconfirmed")?;
+            if !status.authenticated
+                || !status.active
+                || !journal.healthy
+                || journal.journal_id != enrollment.journal_id
+            {
+                return Err("Native journal is unavailable, unhealthy or belongs to a different enrollment".to_owned());
+            }
+            if !enrollment.pending {
+                if !journal_matches(status, &enrollment, self.store.recording_enabled) {
+                    return Err(
+                        "Native recording configuration changed elsewhere; review it before continuing".to_owned(),
+                    );
+                }
+                return Ok(());
+            }
+            let accepted_generation = enrollment
+                .generation
+                .checked_add(1)
+                .ok_or("Native recording generation exhausted")?;
+            let accepted = journal.generation == accepted_generation
+                && journal.recording_epoch == enrollment.recording_epoch
+                && journal.recording == self.store.recording_enabled
+                && journal.retention_days == self.store.limits.retention_days
+                && journal.max_records == self.store.limits.max_records;
+            let acknowledged = if accepted {
+                status.clone()
+            } else {
+                if journal.generation != enrollment.generation {
+                    return Err(
+                        "Native recording generation changed elsewhere; pending intent was not rebased".to_owned(),
+                    );
+                }
+                configure(
+                    status.clone(),
+                    self.store.recording_enabled,
+                    enrollment.recording_epoch.clone(),
+                    self.store.limits.clone(),
+                )
+                .await?
+            };
+            let acknowledged_journal = acknowledged
+                .journal
+                .as_ref()
+                .ok_or("Native recording acknowledgment missing")?;
+            let durable_head = acknowledged_journal.last_sequence;
+            if !acknowledged.authenticated
+                || !acknowledged.active
+                || acknowledged.instance_id != status.instance_id
+                || !acknowledged_journal.healthy
+                || acknowledged_journal.journal_id != enrollment.journal_id
+                || acknowledged_journal.generation != accepted_generation
+                || acknowledged_journal.recording_epoch != enrollment.recording_epoch
+                || acknowledged_journal.recording != self.store.recording_enabled
+                || acknowledged_journal.retention_days != self.store.limits.retention_days
+                || acknowledged_journal.max_records != self.store.limits.max_records
+                || durable_head < enrollment.sequence
+                || acknowledged_journal.provider_restarts < enrollment.provider_restarts
+            {
+                return Err("Native recording acknowledgment did not match the persisted intent".to_owned());
+            }
+            let mut next = self.store.clone();
+            let mut confirmed = enrollment;
+            confirmed.generation = accepted_generation;
+            confirmed.pending = false;
+            confirmed.sequence = confirmed.sequence.max(acknowledged_journal.acknowledged_sequence);
+            // A lost acknowledgment may span a provider restart. Older committed events must remain replayable.
+            next.native_journal = Some(confirmed);
+            self.native_status = acknowledged;
+            self.commit(next).await
+        }
+        .await;
+        if let Err(error) = &result {
+            self.native_error = Some(error.clone());
+        } else {
+            self.native_error = None;
+        }
+        result
+    }
+
+    async fn accept_journal_page(
+        &mut self,
+        expected: &NativeJournalEnrollment,
+        status: &NativeAdapterStatus,
+        page: &NativeJournalPage,
+    ) -> Result<bool, String> {
+        if !self.store.recording_enabled
+            || !self.writable
+            || self.store.native_journal.as_ref() != Some(expected)
+            || expected.pending
+            || !journal_matches(&self.native_status, expected, true)
+            || self.native_status.instance_id != status.instance_id
+            || page.instance_id != status.instance_id
+        {
+            return Err("Native journal read was superseded by a recording or provider change".to_owned());
+        }
+        page.validate(expected)?;
+        let mut next = self.store.clone();
+        let mut cursor = expected.clone();
+        for envelope in &page.events {
+            if cursor.sequence.checked_add(1) != Some(envelope.journal_sequence)
+                || envelope.provider_restarts > cursor.provider_restarts
+            {
+                next.history.interrupt_native(envelope.event.time_ms);
+            }
+            next.history.native_event(
+                &envelope.producer_instance_id,
+                &envelope.recording_epoch,
+                &status.platform,
+                &envelope.event,
+                &next.limits,
+            )?;
+            cursor.sequence = envelope.journal_sequence;
+            cursor.provider_restarts = envelope.provider_restarts;
+            cursor.producer_instance_id.clone_from(&envelope.producer_instance_id);
+        }
+        if page.events.is_empty() && cursor.sequence < page.last_sequence {
+            next.history.interrupt_native(now_ms());
+            cursor.sequence = page.last_sequence;
+        }
+        let caught_up = cursor.sequence == page.last_sequence;
+        if caught_up && page.provider_restarts > cursor.provider_restarts {
+            next.history.interrupt_native(now_ms());
+            cursor.provider_restarts = page.provider_restarts;
+            cursor.producer_instance_id.clone_from(&page.instance_id);
+        }
+        let changed = &cursor != expected;
+        if changed {
+            next.native_journal = Some(cursor);
+            self.commit(next).await?;
+            if !page.events.is_empty() {
+                self.last_sample_at = Some(now_ms());
+            }
+        }
+        Ok(!page.events.is_empty() && page.next_sequence < page.last_sequence)
+    }
+
+    pub async fn clear_history(&mut self, status: Option<&NativeAdapterStatus>) -> Result<(), String> {
+        self.clear_history_with(status, |status, enabled, epoch, limits| async move {
+            super::native_firewall::journal_recording(&status, enabled, &epoch, &limits).await
+        })
+        .await
+    }
+
+    async fn clear_history_with<F, R>(
+        &mut self,
+        status: Option<&NativeAdapterStatus>,
+        configure: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(NativeAdapterStatus, bool, String, HistoryLimits) -> R,
+        R: Future<Output = Result<NativeAdapterStatus, String>>,
+    {
+        let mut next = self.store.clone();
+        let configuration = if let Some(enrollment) = &mut next.native_journal {
+            let status = status.ok_or("Native history source unavailable; clear cannot establish a durable cutoff")?;
+            if enrollment.pending || !journal_matches(status, enrollment, self.store.recording_enabled) {
+                return Err(
+                    "Native recording is pending or changed; clear cannot establish a confirmed cutoff".to_owned(),
+                );
+            }
+            let journal = status.journal.as_ref().ok_or("Native journal missing")?;
+            if journal.last_sequence < enrollment.sequence {
+                return Err("Native journal durable head is behind the saved cursor".to_owned());
+            }
+            enrollment.sequence = journal.last_sequence;
+            enrollment.provider_restarts = journal.provider_restarts;
+            enrollment.producer_instance_id.clear();
+            enrollment.recording_epoch = nanoid::nanoid!();
+            enrollment.pending = true;
+            Some(status.clone())
+        } else {
+            None
+        };
+        next.history = ConnectionHistory::default();
+        self.commit(next).await?;
+        self.epoch = nanoid::nanoid!();
+        self.recording_epoch.clone_from(&self.epoch);
+        if let Some(status) = configuration {
+            self.synchronize_journal_with(&status, configure)
+                .await
+                .map_err(|error| {
+                    format!("Local history cleared; native deletion is pending durable confirmation: {error}")
+                })?;
+        }
         Ok(())
     }
 
     pub async fn set_limits(&mut self, limits: HistoryLimits) -> Result<(), String> {
+        self.set_limits_with(limits, |status, enabled, epoch, limits| async move {
+            super::native_firewall::journal_recording(&status, enabled, &epoch, &limits).await
+        })
+        .await
+    }
+
+    async fn set_limits_with<F, R>(&mut self, limits: HistoryLimits, configure: F) -> Result<(), String>
+    where
+        F: FnOnce(NativeAdapterStatus, bool, String, HistoryLimits) -> R,
+        R: Future<Output = Result<NativeAdapterStatus, String>>,
+    {
         limits.validate()?;
         let mut next = self.store.clone();
         next.limits = limits;
         next.history.prune(now_ms(), &next.limits);
-        self.commit(next).await
+        if let Some(enrollment) = &mut next.native_journal {
+            if enrollment.pending {
+                return Err("Finish the pending native recording change before changing retention".to_owned());
+            }
+            enrollment.pending = true;
+        }
+        self.commit(next).await?;
+        let status = self.native_status.clone();
+        self.synchronize_journal_with(&status, configure).await
     }
 
     async fn native_outage(&mut self, recorder: &mut NativeRecorderCursor, reason: String) -> bool {
@@ -379,6 +710,71 @@ const NATIVE_PAGE_SIZE: usize = 256;
 const NATIVE_MAX_PAGES: usize = 8;
 const NATIVE_DRAIN_BUDGET: Duration = Duration::from_secs(2);
 
+fn journal_matches(status: &NativeAdapterStatus, enrollment: &NativeJournalEnrollment, enabled: bool) -> bool {
+    status.authenticated
+        && status.active
+        && status.monitoring
+        && status.journal.as_ref().is_some_and(|journal| {
+            journal.healthy
+                && journal.journal_id == enrollment.journal_id
+                && journal.generation == enrollment.generation
+                && journal.recording_epoch == enrollment.recording_epoch
+                && journal.recording == enabled
+        })
+}
+
+async fn drain_journal_events(state: &Mutex<NetworkState>) {
+    let deadline = tokio::time::Instant::now() + NATIVE_DRAIN_BUDGET;
+    for _ in 0..NATIVE_MAX_PAGES {
+        let (status, enrollment) = {
+            let current = state.lock().await;
+            let Some(enrollment) = current.store.native_journal.clone() else {
+                return;
+            };
+            if !current.writable
+                || !current.store.recording_enabled
+                || enrollment.pending
+                || !journal_matches(&current.native_status, &enrollment, true)
+            {
+                return;
+            }
+            let result = (current.native_status.clone(), enrollment);
+            drop(current);
+            result
+        };
+        if tokio::time::Instant::now() >= deadline {
+            return;
+        }
+        let result = tokio::time::timeout_at(deadline, async {
+            super::native_firewall::journal_ack(&status, &enrollment).await?;
+            super::native_firewall::journal_events(&status, &enrollment).await
+        })
+        .await
+        .unwrap_or_else(|_| Err("Native journal request timed out; retained history will be retried".to_owned()));
+        let mut current = state.lock().await;
+        if current.store.native_journal.as_ref() != Some(&enrollment) {
+            return;
+        }
+        let accepted = match result {
+            Ok(page) => current.accept_journal_page(&enrollment, &status, &page).await,
+            Err(error) => Err(error),
+        };
+        match accepted {
+            Ok(more) => {
+                current.native_error = None;
+                if !more {
+                    return;
+                }
+            }
+            Err(error) => {
+                current.native_error = Some(error);
+                return;
+            }
+        }
+        drop(current);
+    }
+}
+
 impl NativeRecorderCursor {
     fn needs_baseline(&self, epoch: &str, status: &NativeAdapterStatus) -> bool {
         self.recording_epoch != epoch || self.instance != status.instance_id
@@ -444,7 +840,24 @@ fn start_native_recorder() {
             let status = super::native_firewall::status().await;
             let epoch = {
                 let mut current = state.lock().await;
+                if current.recording_epoch != status_epoch {
+                    drop(current);
+                    continue;
+                }
                 current.native_status = status.clone();
+                if current.store.native_journal.is_some() {
+                    if current.writable {
+                        let _ = current
+                            .synchronize_journal_with(&status, |status, enabled, epoch, limits| async move {
+                                super::native_firewall::journal_recording(&status, enabled, &epoch, &limits).await
+                            })
+                            .await;
+                    }
+                    recorder = NativeRecorderCursor::default();
+                    drop(current);
+                    drain_journal_events(state).await;
+                    continue;
+                }
                 if !current.store.recording_enabled || !current.writable {
                     recorder = NativeRecorderCursor::default();
                     drop(current);
@@ -506,6 +919,242 @@ mod tests {
     use super::*;
     use clash_verge_network::{HistoryState, NativeFlowEvent};
     use serde_json::json;
+
+    fn journal_status() -> NativeAdapterStatus {
+        NativeAdapterStatus {
+            platform: "macos".to_owned(),
+            instance_id: "provider-current".to_owned(),
+            active: true,
+            authenticated: true,
+            monitoring: true,
+            journal: Some(clash_verge_network::NativeJournalStatus {
+                journal_id: "journal".to_owned(),
+                generation: 0,
+                recording: false,
+                recording_epoch: String::new(),
+                first_sequence: 1,
+                last_sequence: 0,
+                acknowledged_sequence: 0,
+                dropped_events: 0,
+                provider_restarts: 1,
+                retention_days: 7,
+                max_records: 10_000,
+                healthy: true,
+                reason: String::new(),
+            }),
+            ..NativeAdapterStatus::unavailable("fixture")
+        }
+    }
+
+    fn configured(
+        mut status: NativeAdapterStatus,
+        enabled: bool,
+        epoch: String,
+        limits: HistoryLimits,
+    ) -> Result<NativeAdapterStatus, String> {
+        let journal = status.journal.as_mut().ok_or("Missing fixture journal")?;
+        let fresh_epoch = journal.recording_epoch != epoch;
+        journal.generation += 1;
+        journal.recording = enabled;
+        journal.recording_epoch = epoch;
+        if fresh_epoch {
+            journal.acknowledged_sequence = journal.last_sequence;
+            journal.first_sequence = journal.last_sequence + 1;
+        }
+        journal.retention_days = limits.retention_days;
+        journal.max_records = limits.max_records;
+        Ok(status)
+    }
+
+    #[tokio::test]
+    async fn journal_intent_is_durable_before_ipc_and_lost_ack_reconciles_without_reenabling() -> Result<(), String> {
+        let mut current = recorder_fixture();
+        current.store.recording_enabled = false;
+        current.update_native_status(journal_status());
+        let path = current.path.clone();
+        let inspect = path.clone();
+        assert!(
+            current
+                .set_recording_with(true, move |_, enabled, epoch, _| async move {
+                    let stored = saved_recorder_fixture(&inspect)?;
+                    let enrollment = stored.native_journal.ok_or("Missing persisted consent")?;
+                    assert!(enabled && stored.recording_enabled && enrollment.pending);
+                    assert_eq!(enrollment.recording_epoch, epoch);
+                    Err("Lost native acknowledgment".to_owned())
+                })
+                .await
+                .is_err()
+        );
+        let intent = current.store.native_journal.clone().ok_or("Missing intent")?;
+        let mut accepted = configured(
+            current.native_status.clone(),
+            true,
+            intent.recording_epoch.clone(),
+            current.store.limits.clone(),
+        )?;
+        accepted.instance_id = "provider-resumed".to_owned();
+        accepted
+            .journal
+            .as_mut()
+            .ok_or("Missing fixture journal")?
+            .provider_restarts = 2;
+        current
+            .synchronize_journal_with(&accepted, |_, _, _, _| async {
+                Err("Must not repeat accepted consent".to_owned())
+            })
+            .await?;
+        assert!(current.background_recording());
+        let confirmed = current
+            .store
+            .native_journal
+            .clone()
+            .ok_or("Missing confirmed consent")?;
+        assert!(!confirmed.pending);
+        assert_eq!(confirmed.generation, 1);
+        assert_eq!(confirmed.provider_restarts, 1);
+        let resumed = NetworkStore::load(&path, now_ms())?;
+        assert_eq!(resumed.native_journal, Some(confirmed));
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn journal_replay_preserves_producer_and_atomically_saves_cursor_before_ack() -> Result<(), String> {
+        let mut current = recorder_fixture();
+        let path = current.path.clone();
+        let status = configured(
+            journal_status(),
+            true,
+            "recording".to_owned(),
+            current.store.limits.clone(),
+        )?;
+        let enrollment = NativeJournalEnrollment {
+            journal_id: "journal".to_owned(),
+            recording_epoch: "recording".to_owned(),
+            generation: 1,
+            sequence: 0,
+            provider_restarts: 1,
+            producer_instance_id: "provider-old".to_owned(),
+            pending: false,
+        };
+        current.native_status = status.clone();
+        current.store.native_journal = Some(enrollment.clone());
+        let page: NativeJournalPage = serde_json::from_value(json!({
+            "instanceId":"provider-current","journalId":"journal","recordingEpoch":"recording",
+            "firstSequence":1,"lastSequence":2,"nextSequence":2,"providerRestarts":2,"droppedEvents":0,
+            "events":[
+                {"journalSequence":1,"producerInstanceId":"provider-old","recordingEpoch":"recording","providerRestarts":1,
+                 "event":{"flowId":"old-flow","sequence":41,"timeMs":now_ms(),"kind":"open","identityConfidence":"unknown",
+                 "sourceIp":"127.0.0.1","sourcePort":1234,"destinationIp":"127.0.0.1","destinationPort":443,"network":"tcp","counterSemantics":"cumulative","upload":10,"verdict":"observe"}},
+                {"journalSequence":2,"producerInstanceId":"provider-current","recordingEpoch":"recording","providerRestarts":2,
+                 "event":{"flowId":"new-flow","sequence":1,"timeMs":now_ms()+1,"kind":"update","identityConfidence":"unknown",
+                 "sourceIp":"127.0.0.1","sourcePort":1235,"destinationIp":"127.0.0.1","destinationPort":443,"network":"tcp","counterSemantics":"cumulative","upload":900,"verdict":"observe"}}
+            ]
+        })).map_err(|error| error.to_string())?;
+        let mut first = page.clone();
+        first.events.truncate(1);
+        first.next_sequence = 1;
+        assert!(current.accept_journal_page(&enrollment, &status, &first).await?);
+        let first_cursor = current
+            .store
+            .native_journal
+            .clone()
+            .ok_or("Missing first-page cursor")?;
+        assert_eq!(
+            saved_recorder_fixture(&path)?.native_journal,
+            Some(first_cursor.clone())
+        );
+        let mut remainder = page.clone();
+        remainder.events.remove(0);
+        assert!(!current.accept_journal_page(&first_cursor, &status, &remainder).await?);
+        let saved = saved_recorder_fixture(&path)?;
+        let cursor = saved.native_journal.ok_or("Missing persisted cursor")?;
+        assert_eq!(cursor.sequence, 2);
+        assert_eq!(cursor.provider_restarts, 2);
+        assert_eq!(saved.history.records[0].epoch, "provider-old");
+        assert_eq!(saved.history.records[0].state, HistoryState::EndedIncomplete);
+        assert_eq!(saved.history.records[1].observed_upload, 0);
+        assert_eq!(saved.history.gap_count, 1);
+        assert!(current.accept_journal_page(&enrollment, &status, &page).await.is_err());
+        let denied = path.with_file_name("not-a-directory");
+        std::fs::write(&denied, b"fixture").map_err(|error| error.to_string())?;
+        current.path = denied.join("workspace.json");
+        let mut later = page;
+        later.events.drain(..1);
+        later.events[0].journal_sequence = 3;
+        later.events[0].event.sequence = 2;
+        later.events[0].event.upload = 950;
+        later.last_sequence = 3;
+        later.next_sequence = 3;
+        assert!(current.accept_journal_page(&cursor, &status, &later).await.is_err());
+        assert_eq!(current.store.native_journal, Some(cursor));
+        assert_eq!(saved_recorder_fixture(&path)?.history.records[1].observed_upload, 0);
+        std::fs::remove_file(denied).map_err(|error| error.to_string())?;
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn journal_retention_change_preserves_replay_scope_and_advances_generation() -> Result<(), String> {
+        let mut current = recorder_fixture();
+        let path = current.path.clone();
+        current.update_native_status(journal_status());
+        current
+            .set_recording_with(true, |status, enabled, epoch, limits| async move {
+                configured(status, enabled, epoch, limits)
+            })
+            .await?;
+        let before = current.store.native_journal.clone().ok_or("Missing enrollment")?;
+        current
+            .set_limits_with(
+                HistoryLimits {
+                    retention_days: 3,
+                    max_records: 100,
+                },
+                |status, enabled, epoch, limits| async move { configured(status, enabled, epoch, limits) },
+            )
+            .await?;
+        let after = current.store.native_journal.clone().ok_or("Missing enrollment")?;
+        assert_eq!(before.recording_epoch, after.recording_epoch);
+        assert_eq!(before.sequence, after.sequence);
+        assert_eq!(after.generation, before.generation + 1);
+        assert!(!after.pending);
+        assert!(current.background_recording());
+        assert_eq!(saved_recorder_fixture(&path)?.limits.max_records, 100);
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn journal_clear_fences_pending_source_data_and_unconfirmed_off_stays_pending() -> Result<(), String> {
+        let mut current = recorder_fixture();
+        let path = current.path.clone();
+        current.native_status = journal_status();
+        current
+            .set_recording_with(true, |status, enabled, epoch, limits| async move {
+                configured(status, enabled, epoch, limits)
+            })
+            .await?;
+        let old = current.store.native_journal.clone().ok_or("Missing enrollment")?;
+        let status = current.native_status.clone();
+        current
+            .clear_history_with(Some(&status), |status, enabled, epoch, limits| async move {
+                configured(status, enabled, epoch, limits)
+            })
+            .await?;
+        let cleared = current.store.native_journal.clone().ok_or("Missing clear cutoff")?;
+        assert_ne!(old.recording_epoch, cleared.recording_epoch);
+        assert!(!cleared.pending);
+        assert!(
+            current
+                .set_recording_with(false, |_, _, _, _| async { Err("Native stop unavailable".to_owned()) })
+                .await
+                .is_err()
+        );
+        let saved = saved_recorder_fixture(&path)?;
+        assert!(!saved.recording_enabled);
+        assert!(saved.native_journal.as_ref().is_some_and(|intent| intent.pending));
+        assert!(!current.background_recording());
+        assert!(current.background_recording_reason().contains("unavailable"));
+        remove_recorder_fixture(&path)
+    }
 
     fn recorder_fixture() -> NetworkState {
         NetworkState {

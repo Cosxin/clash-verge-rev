@@ -351,6 +351,7 @@ interface XHttpOptions {
 interface RealityOptions {
   'public-key'?: string
   'short-id'?: string
+  'support-x25519mlkem768'?: boolean
 }
 type ClientFingerprint =
   | 'chrome'

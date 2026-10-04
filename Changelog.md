@@ -10,6 +10,7 @@
 - Show live route choices only while verified routing rules are active.
 - Catch up with busy native traffic and report gaps only when events were actually missed.
 - Exclude pre-recording and paused-period bytes from observed traffic totals.
+- Preserve explicit hybrid-handshake and UDP settings when importing VLESS Reality links.
 
 **🖥️ Windows**
 
@@ -35,6 +36,10 @@
 - Preserve native source/destination and process evidence in history; keep overlapping native/core traffic counters separate.
 - Switch existing app/default routes without a full reload and show their live choices.
 - Add JSON agent diagnostics and protected route trials with automatic unconfirmed-trial restoration on macOS/Linux.
+
+**🍎 macOS**
+
+- Add opt-in background traffic history for an installed native provider, with confirmation and recording-gap status.
 
 </details>
 

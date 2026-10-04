@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Audit-token identity and loopback filter rules adapted from LuLu (see NOTICE.md).
 #import "Native.h"
+#import "Journal.h"
 #import <NetworkExtension/NetworkExtension.h>
 #import <Security/Security.h>
 #include <bsm/libbsm.h>
@@ -67,6 +68,7 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
 @property (nonatomic, strong) NSMutableDictionary *identities;
 @property (nonatomic) uint64_t sequence;
 @property (nonatomic) uint64_t dropped;
+@property (nonatomic, strong) NCJournal *journal;
 @end
 
 @implementation NCFilterDataProvider
@@ -90,6 +92,7 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
         completionHandler([NSError errorWithDomain:@"NetworkControl" code:1 userInfo:@{NSLocalizedDescriptionKey:@"A configured Developer ID publisher and owner UID are required"}]);
         return;
     }
+    self.journal = [[NCJournal alloc] initWithInstance:self.instance];
     NSMutableArray *rules = [NSMutableArray array];
     for (NSNumber *direction in @[@(NETrafficDirectionOutbound),@(NETrafficDirectionInbound)]) {
         for (NSArray *loopback in @[@[@"127.0.0.0",@8],@[@"::1",@128]]) {
@@ -118,6 +121,7 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
     self.active = NO;
     [self.listener invalidate];
     self.listener = nil;
+    [self.journal close];
     completionHandler();
 }
 
@@ -136,9 +140,10 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
     return @{@"schemaVersion":@1,@"ok":@YES,@"platform":@"macos",@"installed":@YES,@"active":@(self.active),
         @"authenticated":@(self.authenticated),@"policyInitialized":@(policy != nil),@"monitoring":@(self.active),
         @"eventSequence":@(sequence),@"droppedEvents":@(dropped),
+        @"journal":[self.journal status] ?: NSNull.null,
         @"generation":policy[@"generation"] ?: @0,@"processPaths":policy[@"processPaths"] ?: @[],@"instanceId":self.instance,
         @"existingFlowBehavior":@"new_flows_only",@"coverage":@"tcp_udp_socket_flows",@"unknownIdentityAction":@"block",
-        @"reason":self.failure ?: (policy ? @"TCP/UDP socket flows; existing-flow teardown is not guaranteed. History is a bounded volatile ring." : @"Policy uninitialized: flows are blocked until an explicit ban policy is committed")};
+        @"reason":self.failure ?: (policy ? @"TCP/UDP socket flows; existing-flow teardown is not guaranteed. Durable history requires separately confirmed recording consent." : @"Policy uninitialized: flows are blocked until an explicit ban policy is committed")};
 }
 
 - (void)request:(NSData *)data reply:(void (^)(NSData *))reply {
@@ -147,6 +152,13 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
     NSString *error = nil;
     if (![command isKindOfClass:NSString.class]) error = @"Invalid native command";
     else if ([command isEqual:@"status"] && request.count == 1) { reply(NCEncode([self status])); return; }
+    else if ([command hasPrefix:@"journal-"]) {
+        [self.journal request:request reply:^(NSDictionary *result) {
+            if ([result[@"ok"] boolValue] && result[@"journal"]) reply(NCEncode([self status]));
+            else reply(NCEncode(result));
+        }];
+        return;
+    }
     else if ([command isEqual:@"apply-bans"] && request.count == 4) {
         @synchronized (self.policyLock) {
             NSDictionary *policy = request[@"policy"];
@@ -196,6 +208,7 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
 }
 
 - (void)append:(NEFilterSocketFlow *)flow identity:(NSDictionary *)identity kind:(NSString *)kind upload:(NSUInteger)upload download:(NSUInteger)download verdict:(NSString *)verdict generation:(NSNumber *)generation {
+    NSString *recordingToken = [self.journal recordingToken];
     NWHostEndpoint *local = [flow.localEndpoint isKindOfClass:NWHostEndpoint.class] ? (NWHostEndpoint *)flow.localEndpoint : nil;
     NWHostEndpoint *remote = [flow.remoteEndpoint isKindOfClass:NWHostEndpoint.class] ? (NWHostEndpoint *)flow.remoteEndpoint : nil;
     NSMutableDictionary *event = [identity mutableCopy];
@@ -207,6 +220,7 @@ static NSDictionary *NCIdentity(NEFilterFlow *flow) {
         event[@"sequence"] = @(++self.sequence);
         [self.events addObject:event];
         if (self.events.count > 5000) { [self.events removeObjectAtIndex:0]; self.dropped++; }
+        [self.journal enqueue:[event copy] recordingToken:recordingToken];
     }
 }
 

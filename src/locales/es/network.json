@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Registrar las fuentes de conexiones disponibles",
-    "recordingDescription": "Historial local opcional mientras se ejecuta el proceso de escritorio: instantáneas del núcleo y eventos de un proveedor de supervisión autenticado. Las fuentes tienen contadores independientes y cobertura incompleta. Las escrituras del núcleo se agrupan; una salida repentina puede perder los últimos 10 segundos. Al reactivar el registro, no se importan los eventos nativos acumulados mientras estaba desactivado.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

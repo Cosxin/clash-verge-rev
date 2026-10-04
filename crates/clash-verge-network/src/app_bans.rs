@@ -68,6 +68,8 @@ pub struct NativeAdapterStatus {
     pub event_sequence: u64,
     #[serde(default)]
     pub dropped_events: u64,
+    #[serde(default)]
+    pub journal: Option<crate::NativeJournalStatus>,
     pub generation: u64,
     pub process_paths: Vec<String>,
     pub instance_id: String,
@@ -87,6 +89,7 @@ impl NativeAdapterStatus {
             monitoring: false,
             event_sequence: 0,
             dropped_events: 0,
+            journal: None,
             generation: 0,
             process_paths: Vec::new(),
             instance_id: String::new(),

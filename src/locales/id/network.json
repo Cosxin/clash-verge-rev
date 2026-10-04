@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Rekam sumber koneksi yang tersedia",
-    "recordingDescription": "Riwayat lokal opsional selama proses desktop berjalan: snapshot inti dan peristiwa dari penyedia pemantauan yang terautentikasi. Setiap sumber memiliki penghitung terpisah dan cakupan tidak lengkap. Penulisan inti dilakukan secara berkelompok; keluar mendadak dapat menghilangkan 10 detik terakhir. Saat perekaman diaktifkan kembali, peristiwa native yang tertunda selama perekaman nonaktif tidak diimpor.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

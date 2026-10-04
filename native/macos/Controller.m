@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
             NCPrint(@{@"schemaVersion":@1,@"ok":@(valid),@"nativeOperationsPerformed":@NO});
             return valid ? 0 : 1;
         }
-        if (![@[@"status",@"apply-bans",@"events"] containsObject:command]) { NCPrint(@{@"schemaVersion":@1,@"ok":@NO,@"error":@"Expected status, apply-bans or events"}); return 1; }
+        if (![@[@"status",@"apply-bans",@"events",@"journal-recording",@"journal-events",@"journal-ack"] containsObject:command]) { NCPrint(@{@"schemaVersion":@1,@"ok":@NO,@"error":@"Unsupported native command"}); return 1; }
         if (!NCSignedOwner(NC_CONTROLLER_ID) || (getuid() != (uid_t)NC_OWNER_UID && getuid() != 0)) {
             NCPrint(NCUnavailable(@"Native control requires the configured Developer ID signature, hardened runtime and owner UID; no provider connection was attempted"));
             return [command isEqual:@"status"] ? 0 : 1;

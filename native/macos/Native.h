@@ -23,3 +23,4 @@ NSDictionary *NCUnavailable(NSString *reason);
 BOOL NCInteger(id value);
 BOOL NCSavePolicy(NSDictionary *policy, NSString **failure);
 NSDictionary *NCLoadPolicy(NSString **failure);
+NSString *NCNativeDirectory(BOOL create);

@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "利用可能な接続情報源を記録",
-    "recordingDescription": "デスクトッププロセスの実行中に、任意でローカル履歴を記録します。対象はコアのスナップショットと認証済み監視プロバイダーのイベントです。情報源ごとにカウンターは独立しており、監視範囲は不完全です。コアの書き込みは一括処理され、突然終了すると最後の 10 秒分が失われる場合があります。記録を再開しても、記録停止中に蓄積されたネイティブイベントは取り込まれません。",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

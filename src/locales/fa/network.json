@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "ثبت منابع اتصال موجود",
-    "recordingDescription": "تاریخچهٔ محلی اختیاری در زمان اجرای فرایند برنامهٔ دسکتاپ: تصویرهای لحظه‌ای هسته و رویدادهای ارائه‌دهندهٔ نظارت با هویت تأییدشده. منابع شمارنده‌های جداگانه و پوشش ناقص دارند. نوشته‌های هسته دسته‌ای ذخیره می‌شوند؛ خروج ناگهانی ممکن است داده‌های ۱۰ ثانیهٔ آخر را از بین ببرد. با فعال‌سازی دوبارهٔ ثبت، رویدادهای بومی انباشته‌شده در زمان غیرفعال بودن آن وارد نمی‌شوند.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

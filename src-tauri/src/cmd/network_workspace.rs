@@ -2,8 +2,7 @@ use super::{CmdResult, StringifyErr as _};
 use crate::core::network_workspace::{self, NetworkWorkspace};
 use clash_verge_network::lsrules::{LsExportReport, LsImportReport, export_lsrules, import_lsrules};
 use clash_verge_network::{
-    ConnectionHistory, HistoryLimits, HistoryPage, HistoryQuery, NativeAdapterStatus, NetworkPolicy, PolicyPreview,
-    PreviewInput,
+    HistoryLimits, HistoryPage, HistoryQuery, NativeAdapterStatus, NetworkPolicy, PolicyPreview, PreviewInput,
 };
 
 #[tauri::command]
@@ -87,7 +86,11 @@ pub async fn preview_network_policy(input: PreviewInput) -> CmdResult<PolicyPrev
 
 #[tauri::command]
 pub async fn set_network_history_enabled(enabled: bool) -> CmdResult<NetworkWorkspace> {
+    #[cfg(not(all(test, feature = "clippy")))]
+    let status = crate::core::native_firewall::status().await;
     let mut current = network_workspace::state().await.stringify_err()?.lock().await;
+    #[cfg(not(all(test, feature = "clippy")))]
+    current.update_native_status(status);
     current.set_recording(enabled).await.stringify_err()?;
     Ok(current.view())
 }
@@ -113,10 +116,12 @@ pub async fn get_network_history(query: Option<HistoryQuery>) -> CmdResult<Histo
 
 #[tauri::command]
 pub async fn clear_network_history() -> CmdResult<()> {
+    #[cfg(not(all(test, feature = "clippy")))]
+    let status = crate::core::native_firewall::status().await;
+    #[cfg(all(test, feature = "clippy"))]
+    let status = NativeAdapterStatus::unavailable("fixture");
     let mut current = network_workspace::state().await.stringify_err()?.lock().await;
-    let mut next = current.store.clone();
-    next.history = ConnectionHistory::default();
-    current.commit(next).await.stringify_err()
+    current.clear_history(Some(&status)).await.stringify_err()
 }
 
 #[tauri::command]

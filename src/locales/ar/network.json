@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "تسجيل مصادر الاتصالات المتاحة",
-    "recordingDescription": "سجل محلي اختياري أثناء تشغيل عملية تطبيق سطح المكتب: لقطات النواة وأحداث موفّر مراقبة تم التحقق من هويته. لكل مصدر عدادات مستقلة وتغطية غير مكتملة. تُجمع عمليات كتابة النواة في دفعات؛ قد يؤدي الخروج المفاجئ إلى فقدان آخر 10 ثوانٍ. عند إعادة تفعيل التسجيل، لا تُستورد الأحداث الأصلية المتراكمة أثناء إيقافه.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "사용 가능한 연결 정보원 기록",
-    "recordingDescription": "데스크톱 프로세스가 실행되는 동안 선택적으로 로컬 기록을 저장합니다. 대상은 코어 스냅샷과 인증된 모니터링 공급자의 이벤트입니다. 정보원마다 별도 카운터를 사용하며 관찰 범위는 불완전합니다. 코어 쓰기는 일괄 처리되므로 갑작스러운 종료 시 마지막 10초가 손실될 수 있습니다. 기록을 다시 켜도 기록이 꺼져 있는 동안 쌓인 네이티브 이벤트는 가져오지 않습니다.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

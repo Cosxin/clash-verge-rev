@@ -90,6 +90,11 @@ export const NetworkHistory = ({ enabled, workspace, onChanged }: Props) => {
       setConfirmation(null)
     } catch (error) {
       showNotice.error(error)
+      if (confirmation === 'clear') {
+        await Promise.all([refetch(), onChanged()]).catch((refreshError) =>
+          showNotice.error(refreshError),
+        )
+      }
     } finally {
       setLoading(false)
     }

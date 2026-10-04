@@ -54,7 +54,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Record available connection sources",
-    "recordingDescription": "Opt-in local history while the desktop process runs: core snapshots plus events from an authenticated monitoring provider. Sources have separate counters and incomplete coverage. Core writes are batched; abrupt exit can lose the last 10 seconds. Recording-off native backlog is not imported when re-enabled.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",
@@ -136,7 +139,7 @@
   "history": {
     "nativeIdentity": "OS audit-token identity",
     "closed": "OS close reported",
-    "nativeCoverage": "Native TCP/UDP events and Mihomo snapshots are distinct sources and must not be summed as total system traffic. Provider queues can drop events; final bytes and coverage remain source-specific. Independent durable 24/7 history is not yet implemented.",
+    "nativeCoverage": "Native TCP/UDP events and core snapshots are distinct sources, not an additive device total. Background retention requires confirmed native recording; event loss, final bytes and coverage remain source-specific.",
     "source": "Source",
     "title": "Observed core connections",
     "coverage": "Core-only, sampled and incomplete. No direct-traffic coverage or native verdicts. Disappearing from a snapshot is not proof of an exact close time.",

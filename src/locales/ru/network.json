@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Записывать доступные источники соединений",
-    "recordingDescription": "Необязательная локальная история во время работы процесса настольного приложения: снимки ядра и события провайдера мониторинга с подтверждённой подлинностью. У источников отдельные счётчики и неполный охват. Записи ядра сохраняются пакетами; внезапное завершение может привести к потере последних 10 секунд. При повторном включении записи не импортируются нативные события, накопленные, пока запись была отключена.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

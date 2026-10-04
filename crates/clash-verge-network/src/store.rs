@@ -1,4 +1,4 @@
-use crate::{AppRoutingPolicy, ConnectionHistory, HistoryLimits, NetworkPolicy};
+use crate::{AppRoutingPolicy, ConnectionHistory, HistoryLimits, NativeJournalEnrollment, NetworkPolicy};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -12,6 +12,8 @@ pub struct NetworkStore {
     pub schema_version: u32,
     pub policy: NetworkPolicy,
     pub recording_enabled: bool,
+    #[serde(default)]
+    pub native_journal: Option<NativeJournalEnrollment>,
     pub limits: HistoryLimits,
     pub history: ConnectionHistory,
     #[serde(default)]
@@ -30,6 +32,7 @@ impl Default for NetworkStore {
             schema_version: 1,
             policy: NetworkPolicy::default(),
             recording_enabled: false,
+            native_journal: None,
             limits: HistoryLimits::default(),
             history: ConnectionHistory::default(),
             app_routes: AppRoutingPolicy::default(),
@@ -63,6 +66,9 @@ impl NetworkStore {
             active.validate()?;
         }
         store.limits.validate()?;
+        if let Some(enrollment) = &store.native_journal {
+            enrollment.validate()?;
+        }
         store.history.interrupt(now, store.recording_enabled);
         store.history.prune(now, &store.limits);
         store.history.prune_to_bytes(32 * 1024 * 1024);
@@ -149,17 +155,16 @@ mod tests {
         let loaded = NetworkStore::load(&path, 1000)?;
         assert_eq!(loaded.policy.generation, 1);
         assert!(!loaded.recording_enabled);
+        assert!(loaded.native_journal.is_none());
         assert!(!loaded.active_app_route_slots);
         let mut legacy = serde_json::to_value(&store).map_err(|error| error.to_string())?;
-        legacy
-            .as_object_mut()
-            .ok_or("Expected store object")?
-            .remove("activeAppRouteSlots");
-        assert!(
-            !serde_json::from_value::<NetworkStore>(legacy)
-                .map_err(|error| error.to_string())?
-                .active_app_route_slots
-        );
+        let fields = legacy.as_object_mut().ok_or("Expected store object")?;
+        fields.remove("activeAppRouteSlots");
+        fields.remove("nativeJournal");
+        fields.insert("recordingEnabled".to_owned(), serde_json::Value::Bool(true));
+        let legacy: NetworkStore = serde_json::from_value(legacy).map_err(|error| error.to_string())?;
+        assert!(!legacy.active_app_route_slots);
+        assert!(legacy.recording_enabled && legacy.native_journal.is_none());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;

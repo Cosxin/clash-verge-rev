@@ -80,6 +80,10 @@ static BOOL NCDirectory(BOOL create) {
     return YES;
 }
 
+NSString *NCNativeDirectory(BOOL create) {
+    return NCDirectory(create) ? Directory : nil;
+}
+
 NSDictionary *NCLoadPolicy(NSString **failure) {
     NSString *path = [Directory stringByAppendingPathComponent:@"policy.json"];
     if (![NSFileManager.defaultManager fileExistsAtPath:path]) return nil;

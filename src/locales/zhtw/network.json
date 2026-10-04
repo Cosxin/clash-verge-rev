@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "記錄可用連線來源",
-    "recordingDescription": "需主動啟用；僅在桌面程序執行時記錄本機歷史，包括核心快照與已驗證監控提供者的事件。各來源使用獨立計數器，涵蓋範圍不完整。核心寫入採批次處理，意外結束可能遺失最近 10 秒。重新啟用記錄時，不會匯入記錄關閉期間累積的原生事件。",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",

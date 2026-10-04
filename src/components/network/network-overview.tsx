@@ -74,10 +74,10 @@ export const NetworkOverview = ({ workspace, onChanged }: Props) => {
     setLoading(true)
     try {
       await setNetworkHistoryEnabled(enabled)
-      await onChanged()
     } catch (error) {
       showNotice.error(error)
     } finally {
+      await onChanged().catch((error) => showNotice.error(error))
       setLoading(false)
     }
   })
@@ -86,12 +86,12 @@ export const NetworkOverview = ({ workspace, onChanged }: Props) => {
     setLoading(true)
     try {
       await setNetworkHistoryLimits(days, records)
-      await onChanged()
       setConfirmLimits(false)
       showNotice.success('network.settings.saved')
     } catch (error) {
       showNotice.error(error)
     } finally {
+      await onChanged().catch((error) => showNotice.error(error))
       setLoading(false)
     }
   })
@@ -152,6 +152,28 @@ export const NetworkOverview = ({ workspace, onChanged }: Props) => {
           <Typography variant="body2" color="text.secondary">
             {t('network.settings.recordingDescription')}
           </Typography>
+          <Alert severity={workspace.backgroundRecording ? 'success' : 'info'}>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {t(
+                workspace.backgroundRecording
+                  ? 'network.settings.backgroundConfirmed'
+                  : 'network.settings.backgroundUnconfirmed',
+              )}
+            </Typography>
+            {workspace.backgroundRecordingReason}
+          </Alert>
+          {workspace.recordingEnabled &&
+            workspace.backgroundRecordingAvailable &&
+            !workspace.backgroundRecording && (
+              <Button
+                variant="outlined"
+                loading={loading}
+                disabled={!workspace.storageWritable}
+                onClick={() => void toggleRecording(true)}
+              >
+                {t('network.settings.confirmBackground')}
+              </Button>
+            )}
           <Alert severity="info">{t('network.settings.privacy')}</Alert>
           <Box
             sx={{

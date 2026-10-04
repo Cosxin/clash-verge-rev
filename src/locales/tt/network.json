@@ -36,7 +36,10 @@
   "settings": {
     "title": "Local history",
     "recording": "Мөмкин булган тоташу чыганакларын яздыру",
-    "recordingDescription": "Өстәл кушымтасы процессы эшләгәндә генә, теләк буенча җирле тарих языла: үзәкнең мизгеллек күчермәләре һәм расланган күзәтү провайдеры вакыйгалары. Чыганакларның исәпләгечләре аерым, колачлавы тулы түгел. Үзәк язмалары төркемләп саклана; көтмәгәндә чыгу соңгы 10 секунд мәгълүматын югалтырга мөмкин. Яздыру яңадан кабызылганда, ул сүндерелгән чакта җыелган система вакыйгалары кертелми.",
+    "recordingDescription": "Opt-in history. Core snapshots require the desktop process; confirmed native background recording continues after app exit. Sources have separate counters and incomplete coverage. Queues and retention are bounded; recording-off backlog is not imported.",
+    "backgroundConfirmed": "Native background recording confirmed",
+    "backgroundUnconfirmed": "Background recording not confirmed",
+    "confirmBackground": "Confirm or retry background recording",
     "retentionDays": "Retention (days)",
     "maxRecords": "Maximum records",
     "privacy": "History contains app paths and network destinations. It is not sent to a remote service. Disabling recording stops new samples; clear history separately to delete saved records.",
