@@ -11,6 +11,8 @@
 - Catch up with busy native traffic and report gaps only when events were actually missed.
 - Exclude pre-recording and paused-period bytes from observed traffic totals.
 - Preserve explicit hybrid-handshake and UDP settings when importing VLESS Reality links.
+- Preserve ordinary WebSocket transport when importing VLESS links.
+- Keep failed proxy links and their credentials out of diagnostic logs.
 
 **🖥️ Windows**
 
@@ -21,6 +23,7 @@
 - macOS 修复启动或重启应用时偶发内核启动失败，并误提示「需要更新系统服务」的问题
 - macOS 修复 VPN 接管网络或开机网络未就绪时的问题：服务模式内核无法启动、TUN 不可用、系统代理状态读取报错
 - macOS 修复用 `ipconfig set` 手动配置网卡后无法设置系统代理的问题
+- Preserve unread background history when retrying a confirmed recording change.
 
 </details>
 

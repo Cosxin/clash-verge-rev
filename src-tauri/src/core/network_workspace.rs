@@ -222,13 +222,7 @@ impl NetworkState {
         F: FnOnce(NativeAdapterStatus, bool, String, HistoryLimits) -> R,
         R: Future<Output = Result<NativeAdapterStatus, String>>,
     {
-        if self.store.recording_enabled == enabled
-            && self
-                .store
-                .native_journal
-                .as_ref()
-                .is_some_and(|enrollment| enrollment.pending)
-        {
+        if self.store.recording_enabled == enabled && self.store.native_journal.is_some() {
             let status = self.native_status.clone();
             return self.synchronize_journal_with(&status, configure).await;
         }
@@ -1014,6 +1008,57 @@ mod tests {
         assert_eq!(confirmed.provider_restarts, 1);
         let resumed = NetworkStore::load(&path, now_ms())?;
         assert_eq!(resumed.native_journal, Some(confirmed));
+        remove_recorder_fixture(&path)
+    }
+
+    #[tokio::test]
+    async fn journal_confirmed_recording_retry_preserves_unreplayed_backlog() -> Result<(), String> {
+        let mut current = recorder_fixture();
+        current.store.recording_enabled = false;
+        current.update_native_status(journal_status());
+        let path = current.path.clone();
+        current
+            .set_recording_with(true, |status, enabled, epoch, limits| async move {
+                configured(status, enabled, epoch, limits)
+            })
+            .await?;
+        let confirmed = current
+            .store
+            .native_journal
+            .clone()
+            .ok_or("Missing confirmed enrollment")?;
+        let core_epoch = current.epoch.clone();
+        let recording_epoch = current.recording_epoch.clone();
+        let persisted = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let mut status = current.native_status.clone();
+        status.journal.as_mut().ok_or("Missing fixture journal")?.last_sequence = 1;
+        current.update_native_status(status.clone());
+
+        // The initial desktop reply can be lost after consent is confirmed while native capture continues.
+        current
+            .set_recording_with(true, |_, _, _, _| async {
+                Err("A duplicate confirmed toggle must not configure or clear native history".to_owned())
+            })
+            .await?;
+        assert_eq!(current.store.native_journal.as_ref(), Some(&confirmed));
+        assert_eq!(current.epoch, core_epoch);
+        assert_eq!(current.recording_epoch, recording_epoch);
+        assert_eq!(std::fs::read(&path).map_err(|error| error.to_string())?, persisted);
+
+        let page: NativeJournalPage = serde_json::from_value(json!({
+            "instanceId":"provider-current","journalId":"journal","recordingEpoch":confirmed.recording_epoch,
+            "firstSequence":1,"lastSequence":1,"nextSequence":1,"providerRestarts":1,"droppedEvents":0,
+            "events":[{"journalSequence":1,"producerInstanceId":"provider-current","recordingEpoch":confirmed.recording_epoch,"providerRestarts":1,
+                "event":{"flowId":"retry-backlog","sequence":1,"timeMs":now_ms(),"kind":"open","identityConfidence":"unknown",
+                    "sourceIp":"127.0.0.1","sourcePort":1234,"destinationIp":"127.0.0.1","destinationPort":443,
+                    "network":"tcp","counterSemantics":"cumulative","upload":10,"verdict":"observe"}}]
+        }))
+        .map_err(|error| error.to_string())?;
+        assert!(!current.accept_journal_page(&confirmed, &status, &page).await?);
+        let saved = saved_recorder_fixture(&path)?;
+        assert_eq!(saved.native_journal.ok_or("Missing replay cursor")?.sequence, 1);
+        assert_eq!(saved.history.records.len(), 1);
+        assert_eq!(saved.history.records[0].observed_upload, 10);
         remove_recorder_fixture(&path)
     }
 

@@ -161,10 +161,6 @@ export function URI_VLESS(line: string): IProxyVlessConfig {
     } else {
       network = 'tcp'
     }
-
-    if (params.type === 'ws') {
-      httpupgrade = true
-    }
   }
 
   proxy.network = network
@@ -211,8 +207,10 @@ export function URI_VLESS(line: string): IProxyVlessConfig {
             try {
               const parsedHeaders = JSON.parse(host)
               wsOpts.headers = parsedHeaders
-            } catch (e) {
-              console.warn('[URI_VLESS] host JSON.parse failed:', e)
+            } catch {
+              console.warn(
+                '[URI_VLESS] Invalid transport host JSON; using literal host',
+              )
               wsOpts.headers = { Host: host }
             }
           } else {

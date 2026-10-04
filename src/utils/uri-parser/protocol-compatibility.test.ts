@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import parseUri from './index'
 
@@ -7,6 +7,71 @@ const reality =
   'security=reality&sni=example.com&fp=chrome&pbk=fixture-key&sid=0123456789abcdef&flow=xtls-rprx-vision'
 
 describe('protocol share-link compatibility', () => {
+  test('keeps malformed JSON fallback warnings free of imported values', () => {
+    const marker = 'PRIVATE123'
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const vless = parseUri(
+        'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?' +
+          `type=ws&obfsParam=${encodeURIComponent(marker)}`,
+      ) as IProxyVlessConfig
+      expect(vless['ws-opts']?.headers).toEqual({ Host: marker })
+
+      const shadowsocks = parseUri(
+        `ss://${btoa('aes-128-gcm:fixture-password')}@192.0.2.1:443?` +
+          `v2ray-plugin=${btoa(marker)}`,
+      ) as IProxyShadowsocksConfig
+      expect(shadowsocks.plugin).toBe('v2ray-plugin')
+      expect(shadowsocks['plugin-opts']).toEqual({})
+
+      const vmess = parseUri(
+        `vmess://${btoa('auto:00000000-0000-4000-8000-000000000001@192.0.2.1:443')}?` +
+          `obfs=websocket&obfsParam=${encodeURIComponent(marker)}&path=%2Ffixture`,
+      ) as IProxyVmessConfig
+      expect(vmess.server).toBe('192.0.2.1')
+      expect(vmess.port).toBe(443)
+      expect(vmess['ws-opts']).toEqual({
+        headers: { Host: marker },
+        path: '/fixture',
+      })
+
+      expect(warn.mock.calls).toEqual([
+        ['[URI_VLESS] Invalid transport host JSON; using literal host'],
+        ['[URI_SS] Invalid plugin JSON; using empty plugin options'],
+        ['[URI_VMESS] Non-JSON content; trying Shadowrocket format'],
+        ['[URI_VMESS] Invalid transport host JSON; using literal host'],
+      ])
+      expect(warn.mock.calls.flat().map(String).join(' ')).not.toContain(marker)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test.each(['tls', 'reality'])(
+    'keeps ordinary WebSocket aliases distinct from HTTP upgrade with %s',
+    (security) => {
+      const link =
+        'vless://00000000-0000-4000-8000-000000000001@192.0.2.1:443?' +
+        `security=${security}&host=example.com&path=%2Ffixture&type=`
+      const ordinaryOptions = {
+        headers: { Host: 'example.com' },
+        path: '/fixture',
+      }
+      for (const transport of ['ws', 'websocket']) {
+        const proxy = parseUri(link + transport) as IProxyVlessConfig
+        expect(proxy.network).toBe('ws')
+        expect(proxy['ws-opts']).toEqual(ordinaryOptions)
+      }
+      const upgrade = parseUri(link + 'httpupgrade') as IProxyVlessConfig
+      expect(upgrade.network).toBe('ws')
+      expect(upgrade['ws-opts']).toEqual({
+        ...ordinaryOptions,
+        'v2ray-http-upgrade': true,
+        'v2ray-http-upgrade-fast-open': true,
+      })
+    },
+  )
+
   test('preserves modern Reality handshake and explicit UDP settings', () => {
     const proxy = parseUri(
       reality +

@@ -50,12 +50,9 @@ function parseVmessParams(decoded: string, raw: string): Record<string, any> {
   try {
     // V2rayN URI format
     return JSON.parse(decoded)
-  } catch (e) {
+  } catch {
     // Shadowrocket URI format
-    console.warn(
-      '[URI_VMESS] JSON.parse(content) failed, falling back to Shadowrocket parsing:',
-      e,
-    )
+    console.warn('[URI_VMESS] Non-JSON content; trying Shadowrocket format')
     return parseVmessShadowrocketParams(raw)
   }
 }
@@ -178,8 +175,10 @@ export function URI_VMESS(line: string): IProxyVmessConfig {
         if (parsedHost) {
           transportHost = parsedHost
         }
-      } catch (e) {
-        console.warn('[URI_VMESS] transportHost JSON.parse failed:', e)
+      } catch {
+        console.warn(
+          '[URI_VMESS] Invalid transport host JSON; using literal host',
+        )
       }
     }
 

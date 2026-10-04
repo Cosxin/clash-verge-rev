@@ -201,11 +201,9 @@ export const ProxiesEditorViewer = (props: Props) => {
             proxies.push(proxy)
             names.push(proxy.name)
           }
-        } catch (err) {
+        } catch {
           console.warn(
-            '[ProxiesEditorViewer] parseUri failed for line:',
-            uri,
-            err,
+            `[ProxiesEditorViewer] Invalid proxy URI at line ${idx + 1}`,
           )
           // 不阻塞主流程
         }

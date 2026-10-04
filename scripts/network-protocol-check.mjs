@@ -19,6 +19,16 @@ import { fileURLToPath } from 'node:url'
 import * as yaml from 'js-yaml'
 import ts from 'typescript'
 
+import {
+  curlEgress,
+  dnsQuestion,
+  fixtureOptions,
+  negativeProbeFailure,
+  reader,
+  saveReport,
+  validateDns,
+} from './network-protocol-probes.mjs'
+
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const options = {}
@@ -29,6 +39,12 @@ for (let index = 0; index < args.length; index += 2) {
       '--profile',
       '--report',
       '--expected-egress',
+      '--tcp-url',
+      '--destination-ip',
+      '--ca-file',
+      '--udp-dns-port',
+      '--dns-name',
+      '--expected-dns',
       '--hy2-uri',
       '--reality-uri',
     ].includes(args[index]),
@@ -45,8 +61,9 @@ assert.ok(
     options['--profile'] &&
     options['--report'] &&
     net.isIPv4(options['--expected-egress']),
-  'Supply --core FILE --profile FILE --report FILE --expected-egress IP [--hy2-uri FILE --reality-uri FILE]',
+  'Supply --core FILE --profile FILE --report FILE --expected-egress IP --tcp-url HTTPS_URL --destination-ip IP --ca-file FILE --udp-dns-port PORT --dns-name NAME --expected-dns IP [--hy2-uri FILE --reality-uri FILE]',
 )
+const fixture = fixtureOptions(options)
 
 const sha256 = (data) => createHash('sha256').update(data).digest('hex')
 async function privateRead(filename) {
@@ -106,6 +123,11 @@ async function availablePort() {
   return port
 }
 const raw = await privateRead(options['--profile'])
+const trustedCa = await privateRead(options['--ca-file'])
+assert.ok(
+  trustedCa.includes('-----BEGIN CERTIFICATE-----'),
+  'FIXTURE_CA_INVALID',
+)
 let input
 try {
   input = yaml.load(raw)
@@ -127,7 +149,12 @@ if (options['--hy2-uri'] || options['--reality-uri']) {
     ['--reality-uri', 'vless'],
   ]) {
     if (!options[flag]) continue
-    const parsed = parseUri((await privateRead(options[flag])).trim())
+    let parsed
+    try {
+      parsed = parseUri((await privateRead(options[flag])).trim())
+    } catch {
+      throw new Error('URI_IMPORT_FAILED')
+    }
     const index = proxies.findIndex((proxy) => proxy.type === kind)
     assert.ok(
       index >= 0 && parsed.type === kind,
@@ -159,19 +186,63 @@ if (options['--hy2-uri'] || options['--reality-uri']) {
     imports[kind] = { parser: 'src/utils/uri-parser/index.ts', passed: true }
   }
 }
-const temporary = await fs.mkdtemp(
-  path.join(os.tmpdir(), 'network-control-protocol-check-'),
+assert.ok(
+  proxies.every(
+    (proxy) =>
+      ['vless', 'hysteria2', 'vmess', 'trojan', 'ss'].includes(proxy.type) &&
+      proxy.server === fixture.destinationIp &&
+      !proxy['dialer-proxy'] &&
+      !proxy.plugin,
+  ),
+  'Test proxies must connect directly to the supplied fixture IPv4',
 )
+const reportParent = await fs.realpath(
+  path.dirname(path.resolve(options['--report'])),
+)
+const relativeReportParent = path.relative(
+  await fs.realpath(repo),
+  reportParent,
+)
+assert.ok(
+  relativeReportParent === '..' ||
+    relativeReportParent.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeReportParent),
+  'REPORT_OUTSIDE_CHECKOUT_REQUIRED',
+)
+options['--report'] = path.join(
+  reportParent,
+  path.basename(path.resolve(options['--report'])),
+)
+for (const output of [options['--report'], options['--report'] + '.core.log']) {
+  try {
+    await fs.lstat(output)
+  } catch (error) {
+    if (error.code === 'ENOENT') continue
+    assert.fail('REPORT_PATH_UNAVAILABLE')
+  }
+  throw new Error('REPORT_PATH_EXISTS')
+}
+const coreSha256 = sha256(await fs.readFile(options['--core']))
 const controllerPort = await availablePort()
 const proxyPort = await availablePort()
 assert.notEqual(controllerPort, proxyPort, 'Loopback ports collided; retry')
+const temporary = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'network-control-protocol-check-'),
+)
+fixture.caFile = path.join(temporary, 'fixture-ca.pem')
+try {
+  await fs.writeFile(fixture.caFile, trustedCa, { mode: 0o600, flag: 'wx' })
+} catch {
+  await fs.rm(temporary, { recursive: true })
+  assert.fail('FIXTURE_CA_COPY_FAILED')
+}
 const secret = randomBytes(32).toString('hex')
 const report = {
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   host: process.platform,
   arch: process.arch,
-  coreSha256: sha256(await fs.readFile(options['--core'])),
+  coreSha256,
   profileSha256: sha256(raw),
   imports,
   expectedEgress: options['--expected-egress'],
@@ -184,6 +255,7 @@ const report = {
 let child
 let stoppingCore
 let activeProbe
+let activeUdpProbe
 let interruptedSignal
 let phase = 'setup'
 let diagnostics = ''
@@ -197,6 +269,7 @@ for (const signal of ['SIGINT', 'SIGTERM'])
     interruptedSignal = signal
     process.exitCode = signal === 'SIGINT' ? 130 : 143
     activeProbe?.kill('SIGTERM')
+    activeUdpProbe?.()
     void stopCore()
   })
 async function api(method, route, body) {
@@ -279,7 +352,7 @@ async function startCore(nodes) {
     spawnFailure = error.code || 'SPAWN_FAILED'
   })
   for (let attempt = 0; attempt < 40; attempt++) {
-    if (spawnFailure || child.exitCode !== null)
+    if (spawnFailure || child.exitCode !== null || child.signalCode !== null)
       throw new Error('CORE_START_FAILED')
     try {
       await api('GET', '/version')
@@ -292,90 +365,27 @@ async function startCore(nodes) {
 }
 async function tcpEgress() {
   checkInterrupted()
-  return await new Promise((resolve, reject) => {
-    const curl = spawn(
-      'curl',
-      [
-        '--silent',
-        '--show-error',
-        '--fail',
-        '--max-time',
-        '12',
-        '--noproxy',
-        '',
-        '--proxy',
-        `http://127.0.0.1:${proxyPort}`,
-        'https://api4.ipify.org',
-      ],
-      { stdio: ['ignore', 'pipe', 'ignore'] },
-    )
-    activeProbe = curl
-    curl.once('close', () => {
-      if (activeProbe === curl) activeProbe = null
-    })
-    let data = ''
-    curl.stdout.on('data', (chunk) => {
-      data += chunk
-      if (data.length > 1024) curl.kill()
-    })
-    curl.once('error', () => reject(new Error('TCP_PROBE_FAILED')))
-    curl.once('exit', (code) =>
-      code === 0 ? resolve(data.trim()) : reject(new Error('TCP_PROBE_FAILED')),
-    )
+  return await curlEgress(fixture, proxyPort, {
+    onSpawn: (probe) => {
+      activeProbe = probe
+    },
   })
-}
-function reader(socket) {
-  let buffer = Buffer.alloc(0)
-  let pending
-  let failed
-  const complete = () => {
-    if (pending && buffer.length >= pending.length) {
-      const current = pending
-      pending = null
-      const result = buffer.subarray(0, current.length)
-      buffer = buffer.subarray(current.length)
-      clearTimeout(current.timer)
-      current.resolve(result)
-    }
-  }
-  socket.on('data', (chunk) => {
-    buffer = Buffer.concat([buffer, chunk])
-    if (buffer.length > 65536) socket.destroy()
-    complete()
-  })
-  socket.on('error', () => {
-    failed = true
-    if (pending) {
-      clearTimeout(pending.timer)
-      pending.reject(new Error('SOCKS_FAILED'))
-      pending = null
-    }
-  })
-  return (length) =>
-    new Promise((resolve, reject) => {
-      if (failed) {
-        reject(new Error('SOCKS_FAILED'))
-        return
-      }
-      assert.ok(pending == null, 'Reads must be sequential')
-      pending = {
-        length,
-        resolve,
-        reject,
-        timer: setTimeout(() => {
-          pending = null
-          reject(new Error('SOCKS_TIMEOUT'))
-        }, 5000),
-      }
-      complete()
-    })
 }
 async function udpDns() {
   checkInterrupted()
   const control = net.connect(proxyPort, '127.0.0.1')
   const read = reader(control)
   const udp = dgram.createSocket('udp4')
+  activeUdpProbe = () => control.destroy()
   try {
+    await new Promise((resolve, reject) => {
+      const onError = () => reject(new Error('UDP_BIND_FAILED'))
+      udp.once('error', onError)
+      udp.bind(0, '127.0.0.1', () => {
+        udp.removeListener('error', onError)
+        resolve()
+      })
+    })
     control.write(Buffer.from([5, 1, 0]))
     assert.deepEqual(await read(2), Buffer.from([5, 0]))
     control.write(Buffer.from([5, 3, 0, 1, 0, 0, 0, 0, 0, 0]))
@@ -394,51 +404,65 @@ async function udpDns() {
       'UDP relay must be loopback',
     )
     const id = randomBytes(2)
-    const query = Buffer.concat([
-      id,
-      Buffer.from(
-        '01000001000000000000076578616d706c6503636f6d0000010001',
-        'hex',
-      ),
+    const query = dnsQuestion(fixture.dnsName, id)
+    const target = Buffer.from([
+      0,
+      0,
+      0,
+      1,
+      ...fixture.destinationIp.split('.').map(Number),
+      fixture.dnsPort >> 8,
+      fixture.dnsPort & 255,
     ])
-    const packet = Buffer.concat([
-      Buffer.from([0, 0, 0, 1, 1, 1, 1, 1, 0, 53]),
-      query,
-    ])
+    const packet = Buffer.concat([target, query])
     await new Promise((resolve, reject) => {
       const timer = setTimeout(
-        () => reject(new Error('UDP_DNS_TIMEOUT')),
+        () => finish(new Error('UDP_DNS_TIMEOUT')),
         10000,
       )
-      udp.once('error', () => {
+      const finish = (error) => {
         clearTimeout(timer)
-        reject(new Error('UDP_DNS_FAILED'))
-      })
-      udp.once('message', (response, peer) => {
-        clearTimeout(timer)
+        control.removeListener('end', onControlClose)
+        control.removeListener('close', onControlClose)
+        control.removeListener('error', onControlError)
+        udp.removeListener('error', onUdpError)
+        udp.removeListener('message', onMessage)
+        if (error) reject(error)
+        else resolve()
+      }
+      const onControlClose = () => finish(new Error('SOCKS_CLOSED'))
+      const onControlError = () => finish(new Error('SOCKS_FAILED'))
+      const onUdpError = () => finish(new Error('UDP_DNS_FAILED'))
+      const onMessage = (response, peer) => {
         try {
           assert.equal(peer.address, '127.0.0.1')
           assert.equal(peer.port, relay.port)
-          assert.deepEqual(
-            response.subarray(0, 10),
-            Buffer.from([0, 0, 0, 1, 1, 1, 1, 1, 0, 53]),
+          assert.deepEqual(response.subarray(0, target.length), target)
+          validateDns(
+            response.subarray(target.length),
+            query,
+            fixture.expectedDns,
           )
-          const dns = response.subarray(10)
-          assert.ok(
-            dns.length >= 12 &&
-              dns.subarray(0, 2).equals(id) &&
-              dns[2] & 0x80 &&
-              !(dns[3] & 15) &&
-              dns.readUInt16BE(6) > 0,
-          )
-          resolve()
+          finish()
         } catch {
-          reject(new Error('UDP_DNS_INVALID_REPLY'))
+          finish(new Error('UDP_DNS_INVALID_REPLY'))
         }
+      }
+      control.once('end', onControlClose)
+      control.once('close', onControlClose)
+      control.once('error', onControlError)
+      udp.once('error', onUdpError)
+      udp.once('message', onMessage)
+      if (control.destroyed || control.readableEnded) {
+        onControlClose()
+        return
+      }
+      udp.send(packet, relay.port, '127.0.0.1', (error) => {
+        if (error) finish(new Error('UDP_SEND_FAILED'))
       })
-      udp.send(packet, relay.port, '127.0.0.1')
     })
   } finally {
+    activeUdpProbe = null
     control.destroy()
     try {
       udp.close()
@@ -446,15 +470,18 @@ async function udpDns() {
   }
 }
 try {
-  await startCore(proxies)
-  report.coreVersion = (await api('GET', '/version')).version
-  for (const proxy of proxies) {
+  for (const [index, proxy] of proxies.entries()) {
+    const label = `Protocol ${index + 1}`
+    const result = { name: label, type: proxy.type }
     try {
-      phase = proxy.name + ':select'
+      phase = `${label}:${proxy.type}:start`
+      await startCore([proxy])
+      report.coreVersion = (await api('GET', '/version')).version
+      phase = `${label}:${proxy.type}:select`
       await api('PUT', '/proxies/Protocol%20Test', { name: proxy.name })
       const observed = await api('GET', '/proxies/Protocol%20Test')
       assert.equal(observed.now, proxy.name)
-      phase = proxy.name + ':tcp'
+      phase = `${label}:${proxy.type}:tcp`
       const tcpStarted = Date.now()
       const egress = await tcpEgress()
       report.lastObservedEgress = net.isIPv4(egress) ? egress : null
@@ -463,34 +490,31 @@ try {
         options['--expected-egress'],
         'Wrong outbound egress',
       )
-      const tcpMs = Date.now() - tcpStarted
-      phase = proxy.name + ':udp'
+      result.tcpTlsEgress = true
+      result.tcpMs = Date.now() - tcpStarted
+      phase = `${label}:${proxy.type}:udp`
       await udpDns()
-      report.checks.push({
-        name: proxy.name,
-        type: proxy.type,
-        tcpTlsEgress: true,
-        udpDns: true,
-        tcpMs,
-      })
+      result.udpDns = true
+      report.checks.push(result)
       console.log(JSON.stringify(report.checks.at(-1)))
     } catch (error) {
       failedDiagnostics.push(JSON.stringify({ phase }) + '\n' + diagnostics)
       report.checks.push({
-        name: proxy.name,
-        type: proxy.type,
+        ...result,
         passed: false,
         failedPhase: phase,
         failureCategory: /^[A-Z_]+$/.test(error.message)
           ? error.message
           : 'PROBE_OR_CORE_FAILED',
+        failureDetails: error.details,
       })
       console.log(JSON.stringify(report.checks.at(-1)))
     }
   }
   report.authenticationPositiveControls = []
-  for (const proxy of proxies) {
-    phase = proxy.type + ':authenticationPrecondition'
+  for (const [index, proxy] of proxies.entries()) {
+    const label = `Protocol ${index + 1}`
+    phase = `${label}:${proxy.type}:authenticationPrecondition`
     const negatives = []
     if (['hysteria2', 'trojan', 'vmess'].includes(proxy.type)) {
       assert.ok(
@@ -519,30 +543,45 @@ try {
     if (!negatives.length) continue
     assert.ok(
       report.checks.some(
-        (check) =>
-          check.name === proxy.name && check.tcpTlsEgress && check.udpDns,
+        (check) => check.name === label && check.tcpTlsEgress && check.udpDns,
       ),
       'Positive protocol control must pass before negative tests',
     )
     for (const [kind, changes] of negatives) {
-      phase = proxy.type + ':' + kind
+      phase = `${label}:${proxy.type}:${kind}`
       await startCore([{ ...proxy, ...changes }])
       const started = Date.now()
-      await assert.rejects(tcpEgress())
+      let refusal
+      try {
+        await tcpEgress()
+      } catch (error) {
+        if (!negativeProbeFailure(error)) throw error
+        refusal = error
+      }
+      assert.ok(refusal, 'NEGATIVE_AUTHENTICATION_NOT_REFUSED')
       checkInterrupted()
+      assert.ok(
+        child?.exitCode === null && child?.signalCode === null,
+        'CORE_EXITED',
+      )
+      await api('GET', '/version')
       report.checks.push({
+        name: label,
         type: proxy.type,
         negative: kind,
         refused: true,
+        authenticationCauseConfirmed: false,
+        failureCategory: refusal.message,
+        failureDetails: refusal.details,
         elapsedMs: Date.now() - started,
       })
       console.log(JSON.stringify(report.checks.at(-1)))
     }
-    phase = proxy.type + ':positiveControlAfterNegativeTests'
+    phase = `${label}:${proxy.type}:positiveControlAfterNegativeTests`
     await startCore([proxy])
     assert.equal(await tcpEgress(), options['--expected-egress'])
     report.authenticationPositiveControls.push({
-      name: proxy.name,
+      name: label,
       type: proxy.type,
       passed: true,
     })
@@ -558,6 +597,7 @@ try {
   report.failureCategory = /^[A-Z_]+$/.test(error.message)
     ? error.message
     : 'PROBE_OR_CORE_FAILED'
+  report.failureDetails = error.details
   process.exitCode = interruptedSignal
     ? interruptedSignal === 'SIGINT'
       ? 130
@@ -571,21 +611,7 @@ try {
       report.passed = false
       report.failureCategory = 'VALIDATION_INTERRUPTED'
     }
-    if (!report.passed)
-      await fs.writeFile(
-        options['--report'] + '.core.log',
-        failedDiagnostics.join('\n').slice(-1024 * 1024),
-        { mode: 0o600, flag: 'wx' },
-      )
-    await fs.writeFile(
-      options['--report'],
-      JSON.stringify(
-        { ...report, finishedAt: new Date().toISOString() },
-        null,
-        2,
-      ) + '\n',
-      { mode: 0o600, flag: 'wx' },
-    )
+    await saveReport(options['--report'], report, failedDiagnostics.join('\n'))
   } finally {
     await fs.rm(temporary, { recursive: true })
   }
@@ -594,6 +620,6 @@ console.log(
   JSON.stringify({
     passed: report.passed,
     failedPhase: report.failedPhase,
-    report: options['--report'],
+    reportSaved: true,
   }),
 )

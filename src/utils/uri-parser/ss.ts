@@ -97,8 +97,8 @@ export function URI_SS(line: string): IProxyShadowsocksConfig {
       proxy['plugin-opts'] = JSON.parse(
         decodeBase64OrOriginal(v2rayPluginParam),
       )
-    } catch (e) {
-      console.warn('[URI_SS] v2ray-plugin JSON.parse failed:', e)
+    } catch {
+      console.warn('[URI_SS] Invalid plugin JSON; using empty plugin options')
       proxy['plugin-opts'] = {}
     }
   }
