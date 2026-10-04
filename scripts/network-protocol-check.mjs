@@ -2,14 +2,20 @@
 // Explicit, isolated real-server checks. Never changes the desktop profile or host routing.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { constants } from 'node:fs'
-import { createHash, randomBytes } from 'node:crypto'
+import {
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+} from 'node:crypto'
 import dgram from 'node:dgram'
+import { constants } from 'node:fs'
 import fs from 'node:fs/promises'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
 import * as yaml from 'js-yaml'
 import ts from 'typescript'
 
@@ -176,9 +182,25 @@ const report = {
   crossPlatformRuntimeQualified: false,
 }
 let child
+let stoppingCore
+let activeProbe
+let interruptedSignal
 let phase = 'setup'
 let diagnostics = ''
+const failedDiagnostics = []
+function checkInterrupted() {
+  if (interruptedSignal) throw new Error('VALIDATION_INTERRUPTED')
+}
+for (const signal of ['SIGINT', 'SIGTERM'])
+  process.on(signal, () => {
+    if (interruptedSignal) return
+    interruptedSignal = signal
+    process.exitCode = signal === 'SIGINT' ? 130 : 143
+    activeProbe?.kill('SIGTERM')
+    void stopCore()
+  })
 async function api(method, route, body) {
+  checkInterrupted()
   const response = await fetch(`http://127.0.0.1:${controllerPort}${route}`, {
     method,
     headers: {
@@ -192,10 +214,11 @@ async function api(method, route, body) {
   return response.status === 204 ? null : response.json()
 }
 async function stopCore() {
+  if (stoppingCore) return stoppingCore
   if (!child?.pid || child.exitCode !== null || child.signalCode !== null)
     return
   const processToStop = child
-  await new Promise((resolve) => {
+  stoppingCore = new Promise((resolve) => {
     const timer = setTimeout(() => processToStop.kill('SIGKILL'), 3000)
     processToStop.once('exit', () => {
       clearTimeout(timer)
@@ -203,9 +226,16 @@ async function stopCore() {
     })
     processToStop.kill('SIGTERM')
   })
+  try {
+    await stoppingCore
+  } finally {
+    stoppingCore = null
+  }
 }
 async function startCore(nodes) {
+  checkInterrupted()
   await stopCore()
+  checkInterrupted()
   const config = {
     'mixed-port': proxyPort,
     port: 0,
@@ -261,6 +291,7 @@ async function startCore(nodes) {
   throw new Error('CORE_START_TIMEOUT')
 }
 async function tcpEgress() {
+  checkInterrupted()
   return await new Promise((resolve, reject) => {
     const curl = spawn(
       'curl',
@@ -278,6 +309,10 @@ async function tcpEgress() {
       ],
       { stdio: ['ignore', 'pipe', 'ignore'] },
     )
+    activeProbe = curl
+    curl.once('close', () => {
+      if (activeProbe === curl) activeProbe = null
+    })
     let data = ''
     curl.stdout.on('data', (chunk) => {
       data += chunk
@@ -336,6 +371,7 @@ function reader(socket) {
     })
 }
 async function udpDns() {
+  checkInterrupted()
   const control = net.connect(proxyPort, '127.0.0.1')
   const read = reader(control)
   const udp = dgram.createSocket('udp4')
@@ -439,6 +475,7 @@ try {
       })
       console.log(JSON.stringify(report.checks.at(-1)))
     } catch (error) {
+      failedDiagnostics.push(JSON.stringify({ phase }) + '\n' + diagnostics)
       report.checks.push({
         name: proxy.name,
         type: proxy.type,
@@ -451,50 +488,95 @@ try {
       console.log(JSON.stringify(report.checks.at(-1)))
     }
   }
-  const hy2 = proxies.find((proxy) => proxy.type === 'hysteria2')
-  assert.ok(
-    hy2?.fingerprint,
-    'Pinned Hysteria node required for authentication checks',
-  )
-  assert.ok(
-    report.checks.some(
-      (check) =>
-        check.type === 'hysteria2' && check.tcpTlsEgress && check.udpDns,
-    ),
-    'Positive Hysteria control must pass before negative tests',
-  )
-  for (const [kind, changes] of [
-    ['wrongCertificatePin', { fingerprint: '00'.repeat(32) }],
-    ['wrongPassword', { password: randomBytes(32).toString('hex') }],
-  ]) {
-    phase = kind
-    await startCore([{ ...hy2, ...changes }])
-    await assert.rejects(tcpEgress())
-    report.checks.push({ type: 'hysteria2', negative: kind, refused: true })
-    console.log(JSON.stringify(report.checks.at(-1)))
+  report.authenticationPositiveControls = []
+  for (const proxy of proxies) {
+    phase = proxy.type + ':authenticationPrecondition'
+    const negatives = []
+    if (['hysteria2', 'trojan', 'vmess'].includes(proxy.type)) {
+      assert.ok(
+        proxy.fingerprint && proxy['skip-cert-verify'] === false,
+        'TLS test nodes must verify a pinned certificate',
+      )
+      negatives.push(['wrongCertificatePin', { fingerprint: '00'.repeat(32) }])
+    }
+    if (['hysteria2', 'trojan', 'ss'].includes(proxy.type))
+      negatives.push([
+        'wrongPassword',
+        { password: randomBytes(32).toString('hex') },
+      ])
+    if (['vmess', 'vless'].includes(proxy.type))
+      negatives.push(['wrongUuid', { uuid: randomUUID() }])
+    if (proxy.type === 'vless' && proxy['reality-opts']) {
+      const key = generateKeyPairSync('x25519')
+        .publicKey.export({ type: 'spki', format: 'der' })
+        .subarray(-32)
+        .toString('base64url')
+      negatives.push([
+        'wrongRealityPublicKey',
+        { 'reality-opts': { ...proxy['reality-opts'], 'public-key': key } },
+      ])
+    }
+    if (!negatives.length) continue
+    assert.ok(
+      report.checks.some(
+        (check) =>
+          check.name === proxy.name && check.tcpTlsEgress && check.udpDns,
+      ),
+      'Positive protocol control must pass before negative tests',
+    )
+    for (const [kind, changes] of negatives) {
+      phase = proxy.type + ':' + kind
+      await startCore([{ ...proxy, ...changes }])
+      const started = Date.now()
+      await assert.rejects(tcpEgress())
+      checkInterrupted()
+      report.checks.push({
+        type: proxy.type,
+        negative: kind,
+        refused: true,
+        elapsedMs: Date.now() - started,
+      })
+      console.log(JSON.stringify(report.checks.at(-1)))
+    }
+    phase = proxy.type + ':positiveControlAfterNegativeTests'
+    await startCore([proxy])
+    assert.equal(await tcpEgress(), options['--expected-egress'])
+    report.authenticationPositiveControls.push({
+      name: proxy.name,
+      type: proxy.type,
+      passed: true,
+    })
   }
-  phase = 'positiveControlAfterNegativeTests'
-  await startCore([hy2])
-  assert.equal(await tcpEgress(), options['--expected-egress'])
   report.positiveControlAfterNegativeTests = true
   report.passed = report.checks.every((check) => check.passed !== false)
   if (!report.passed) process.exitCode = 1
 } catch (error) {
   // Do not print exception messages, YAML context, URLs, configs or core logs containing credentials.
+  failedDiagnostics.push(JSON.stringify({ phase }) + '\n' + diagnostics)
   report.passed = false
   report.failedPhase = phase
   report.failureCategory = /^[A-Z_]+$/.test(error.message)
     ? error.message
     : 'PROBE_OR_CORE_FAILED'
-  process.exitCode = 1
+  process.exitCode = interruptedSignal
+    ? interruptedSignal === 'SIGINT'
+      ? 130
+      : 143
+    : 1
 } finally {
   await stopCore()
   try {
+    if (interruptedSignal) {
+      report.interruptedSignal = interruptedSignal
+      report.passed = false
+      report.failureCategory = 'VALIDATION_INTERRUPTED'
+    }
     if (!report.passed)
-      await fs.writeFile(options['--report'] + '.core.log', diagnostics, {
-        mode: 0o600,
-        flag: 'wx',
-      })
+      await fs.writeFile(
+        options['--report'] + '.core.log',
+        failedDiagnostics.join('\n').slice(-1024 * 1024),
+        { mode: 0o600, flag: 'wx' },
+      )
     await fs.writeFile(
       options['--report'],
       JSON.stringify(
