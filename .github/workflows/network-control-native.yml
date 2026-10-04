@@ -1,0 +1,66 @@
+name: Network Control Native Checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/network-control]
+    paths:
+      - 'crates/clash-verge-network/**'
+      - 'native/**'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/network-control-native.yml'
+  pull_request:
+    paths:
+      - 'crates/clash-verge-network/**'
+      - 'native/**'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/network-control-native.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: network-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: runner.os == 'macOS'
+        with:
+          node-version: '24.21.0'
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.1 --profile minimal
+      - name: Test shared network contracts and persistence
+        run: cargo test --locked -p clash-verge-network
+      - name: Compile macOS provider without activation and test journal fixtures
+        if: runner.os == 'macOS'
+        run: |
+          node native/macos/build.mjs
+          node native/macos/test-journal.mjs
+      - name: Link Windows native controller without installing its service
+        if: runner.os == 'Windows'
+        run: cargo build --locked --manifest-path native/windows/Cargo.toml
+      - name: Test and build Linux adapter without installing firewall hooks
+        if: runner.os == 'Linux'
+        working-directory: native/linux
+        env:
+          GOTOOLCHAIN: go1.27.1
+        run: |
+          go test -mod=readonly ./...
+          go build -mod=readonly ./...

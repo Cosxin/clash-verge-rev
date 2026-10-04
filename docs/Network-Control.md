@@ -32,7 +32,7 @@ macOS uses a LuLu-derived audit-token identity path and NetworkExtension data pr
 
 Linux uses an explicitly installed root NFQUEUE daemon with a dedicated nftables table, private socket and peer credentials. It rechecks bidirectional TCP/UDP packets, including established traffic, and infers executable ownership through procfs with process-start/fd checks. Ambiguous/unknown identity is blocked. Other firewall providers/tables are not flushed. Performance, kernel coverage and deployment remain unqualified.
 
-Native macOS source builds against the local SDK, Windows source passes target-specific compile checks, and Linux builds for amd64/arm64. None of the providers has been installed or activated on this host. Signed macOS consent/coexistence, Windows linking/service/WFP behavior, and Linux kernel/nft behavior need disposable OS testing. Keep existing protections in place.
+Native macOS source builds against the local SDK, Windows source passes target-specific compile checks, and Linux builds for amd64/arm64. The dedicated native CI workflow runs shared persistence tests on all three operating systems, compiles the macOS provider and journal fixtures, links the Windows controller, and builds/tests Linux source without installing firewall hooks. None of the providers has been installed or activated on this host. Signed macOS consent/coexistence, Windows service/WFP behavior, and Linux kernel/nft behavior still need disposable OS testing. Keep existing protections in place.
 
 ## Draft policies
 
