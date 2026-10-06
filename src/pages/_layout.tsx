@@ -15,8 +15,10 @@ import {
   WindowResizeHandles,
 } from '@/components/layout/window-controller'
 import { useI18n } from '@/hooks/use-i18n'
+import { useTVSpatialNav } from '@/hooks/use-tv-spatial-nav'
 import { useVerge } from '@/hooks/use-verge'
 import { useWindowDecorations } from '@/hooks/use-window'
+import { TVRemoteBar } from '@/components/tv/tv-remote-bar'
 import { useThemeMode } from '@/services/states'
 import getSystem from '@/utils/get-system'
 
@@ -44,6 +46,7 @@ const Layout = () => {
   const { language } = verge ?? {}
   const navCollapsed = verge?.collapse_navbar ?? false
   const { switchLanguage } = useI18n()
+  const { isTV } = useTVSpatialNav()
   const navigate = useNavigate()
   const themeReady = useMemo(() => Boolean(theme), [theme])
   const windowControlsRef = useRef<any>(null)
@@ -127,7 +130,7 @@ const Layout = () => {
       <Paper
         square
         elevation={0}
-        className={`${OS} layout${navCollapsed ? ' layout--nav-collapsed' : ''}`}
+        className={`${OS} layout${navCollapsed ? ' layout--nav-collapsed' : ''}${isTV ? ' layout--tv tv-mode' : ''}`}
         style={{
           borderTopLeftRadius: '0px',
           borderTopRightRadius: '0px',
@@ -171,6 +174,9 @@ const Layout = () => {
             </div>
           </div>
         </div>
+
+        {/* Android TV remote control shortcut bar */}
+        <TVRemoteBar />
       </Paper>
     </ThemeProvider>
   )

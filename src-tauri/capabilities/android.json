@@ -1,0 +1,21 @@
+{
+  "identifier": "android-capability",
+  "platforms": ["android"],
+  "webviews": ["main"],
+  "windows": ["main"],
+  "permissions": [
+    "dialog:default",
+    "dialog:allow-ask",
+    "dialog:allow-message",
+    "deep-link:default",
+    "core:window:allow-set-theme",
+    "notification:default",
+    "http:default",
+    "http:allow-fetch",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://*/*" }, { "url": "http://*/*" }]
+    },
+    "mihomo:default"
+  ]
+}

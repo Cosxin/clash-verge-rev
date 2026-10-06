@@ -1,7 +1,7 @@
 use dark_light::{Mode as SystemTheme, detect as detect_system_theme};
 use tauri::utils::config::Color;
 use tauri::webview::PageLoadEvent;
-use tauri::{Theme, WebviewWindow};
+use tauri::{Manager as _, Theme, WebviewWindow};
 
 use crate::{config::Config, core::handle, utils::resolve::window_script::build_window_initial_script};
 #[cfg(target_os = "macos")]
@@ -46,6 +46,10 @@ fn restore_default_size_if_needed(window: &WebviewWindow) {
 
 pub async fn build_new_window() -> Result<WebviewWindow, String> {
     let app_handle = handle::Handle::app_handle();
+
+    if let Some(existing_window) = app_handle.get_webview_window("main") {
+        return Ok(existing_window);
+    }
 
     let config = Config::verge().await;
     let latest = config.latest_arc();

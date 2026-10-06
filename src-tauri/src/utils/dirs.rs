@@ -26,6 +26,19 @@ pub static UPDATE_INTERVAL_MIGRATED: &str = ".update-interval-migrated";
 
 /// Uses the same platform data resolver as Tauri, including before its handle exists.
 pub fn app_home_dir() -> Result<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(handle) = std::panic::catch_unwind(handle::Handle::app_handle) {
+            if let Ok(dir) = handle.path().app_data_dir() {
+                return Ok(dir);
+            }
+        }
+        let fallback = PathBuf::from(format!("/data/data/{}/files", APP_ID));
+        if fallback.exists() || Path::new(&format!("/data/data/{}", APP_ID)).exists() {
+            return Ok(fallback);
+        }
+    }
+
     ::dirs::data_dir()
         .map(|root| root.join(APP_ID))
         .ok_or_else(|| anyhow::anyhow!("Failed to get the app home directory"))

@@ -92,6 +92,7 @@ async fn resolve_setup() {
     );
 
     Handle::refresh_clash();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     refresh_tray_menu().await;
     resolve_done();
 }
@@ -153,8 +154,11 @@ async fn init_timer() {
 }
 
 async fn init_hotkey() {
-    let skip_register_hotkeys = !Config::verge().await.latest_arc().enable_global_hotkey.unwrap_or(true);
-    logging_error!(Type::Setup, Hotkey::global().init(skip_register_hotkeys).await);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let skip_register_hotkeys = !Config::verge().await.latest_arc().enable_global_hotkey.unwrap_or(true);
+        logging_error!(Type::Setup, Hotkey::global().init(skip_register_hotkeys).await);
+    }
 }
 
 async fn init_auto_lightweight_boot() {
@@ -166,25 +170,28 @@ async fn init_auto_backup() {
 }
 
 async fn init_silent_updater() {
-    use crate::core::SilentUpdater;
-    use crate::core::handle::Handle;
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        use crate::core::SilentUpdater;
+        use crate::core::handle::Handle;
 
-    logging!(debug, Type::Setup, "Initializing silent updater...");
+        logging!(debug, Type::Setup, "Initializing silent updater...");
 
-    let app_handle = Handle::app_handle();
+        let app_handle = Handle::app_handle();
 
-    // Install cached updates before starting background checks.
-    if SilentUpdater::global().try_install_on_startup(app_handle).await {
-        logging!(info, Type::Setup, "Update installed at startup, restarting...");
-        feat::restart_app().await;
+        // Install cached updates before starting background checks.
+        if SilentUpdater::global().try_install_on_startup(app_handle).await {
+            logging!(info, Type::Setup, "Update installed at startup, restarting...");
+            feat::restart_app().await;
+        }
+
+        let app_handle = app_handle.clone();
+        tokio::spawn(async move {
+            SilentUpdater::global().start_background_check(app_handle).await;
+        });
+
+        logging!(info, Type::Setup, "Silent updater initialized");
     }
-
-    let app_handle = app_handle.clone();
-    tokio::spawn(async move {
-        SilentUpdater::global().start_background_check(app_handle).await;
-    });
-
-    logging!(info, Type::Setup, "Silent updater initialized");
 }
 
 pub(crate) fn init_signal() {
@@ -197,6 +204,7 @@ async fn init_work_config() {
 }
 
 async fn init_tray() {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     logging_error!(Type::Setup, Tray::global().init().await);
 }
 

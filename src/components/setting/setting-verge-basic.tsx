@@ -119,6 +119,30 @@ const SettingVergeBasic = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
+      <SettingItem
+        label={t('settings.components.verge.basic.fields.tvMode')}
+      >
+        <GuardState
+          value={verge?.tv_mode ?? 'auto'}
+          onCatch={onError}
+          onFormat={(e: any) => e.target.value}
+          onChange={(e) => onChangeData({ tv_mode: e })}
+          onGuard={(e) => patchVerge({ tv_mode: e })}
+        >
+          <Select size="small" sx={{ width: 140, '> div': { py: '7.5px' } }}>
+            <MenuItem value="auto">
+              {t('settings.components.verge.basic.tvOptions.auto')}
+            </MenuItem>
+            <MenuItem value="always">
+              {t('settings.components.verge.basic.tvOptions.always')}
+            </MenuItem>
+            <MenuItem value="off">
+              {t('settings.components.verge.basic.tvOptions.off')}
+            </MenuItem>
+          </Select>
+        </GuardState>
+      </SettingItem>
+
       {OS !== 'linux' && (
         <SettingItem
           label={t('settings.components.verge.basic.fields.trayClickEvent')}

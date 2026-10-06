@@ -166,9 +166,15 @@
           "showTrayMenu": "显示托盘菜单",
           "disable": "禁用"
         },
+        "tvOptions": {
+          "auto": "自动检测",
+          "always": "总是开启",
+          "off": "关闭"
+        },
         "fields": {
           "language": "语言设置",
           "themeMode": "主题模式",
+          "tvMode": "电视模式 (Android TV)",
           "trayClickEvent": "托盘点击事件",
           "copyEnvType": "复制环境变量类型",
           "startPage": "启动页面",

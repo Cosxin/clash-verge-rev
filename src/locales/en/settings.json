@@ -166,9 +166,15 @@
           "showTrayMenu": "Show Tray Menu",
           "disable": "Disable"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "Language",
           "themeMode": "Theme Mode",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "Tray Click Event",
           "copyEnvType": "Copy Env Type",
           "startPage": "Start Page",

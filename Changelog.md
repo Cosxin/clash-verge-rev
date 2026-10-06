@@ -17,6 +17,7 @@
 <details>
 <summary><strong> ✨ 新增功能 </strong></summary>
 
+- 支持 Android TV 与大屏设备，提供遥控器方向键导航、电视端大屏适配及 Leanback 启动支持
 
 </details>
 

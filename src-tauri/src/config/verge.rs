@@ -26,6 +26,10 @@ pub struct IVerge {
     /// `light` or `dark` or `system`
     pub theme_mode: Option<String>,
 
+    /// `auto` or `always` or `off` (Android TV / 10-foot remote control mode)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tv_mode: Option<String>,
+
     pub tray_event: Option<String>,
 
     pub env_type: Option<String>,
@@ -415,6 +419,7 @@ impl IVerge {
 
         patch!(language);
         patch!(theme_mode);
+        patch!(tv_mode);
         patch!(tray_event);
         patch!(env_type);
         patch!(start_page);
