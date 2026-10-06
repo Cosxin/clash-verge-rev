@@ -54,6 +54,90 @@
   <body>
     <div id="initial-loading-overlay"></div>
     <div id="root"></div>
+    <script>
+      if (!window.__TAURI_INTERNALS__) {
+        const callbacks = new Map();
+        let nextCallbackId = 1;
+        window.__TAURI_INTERNALS__ = {
+          metadata: {
+            currentWindow: { label: 'main' },
+            currentWebview: { windowLabel: 'main', label: 'main' },
+          },
+          invoke: async (cmd, args) => {
+            if (cmd === 'plugin:window|is_maximized') return false;
+            if (cmd === 'plugin:window|is_visible') return true;
+            if (cmd === 'plugin:window|is_focused') return true;
+            if (cmd === 'plugin:window|is_decorated') return false;
+            if (cmd === 'plugin:window|theme') return 'dark';
+            if (cmd === 'get_verge_config') {
+              return {
+                theme_mode: 'dark',
+                language: 'en',
+                tv_mode: 'always',
+              };
+            }
+            if (cmd === 'get_sys_proxy') return { enable: false };
+            if (cmd === 'get_profiles') {
+              return {
+                current: 'default',
+                items: [
+                  {
+                    uid: 'default',
+                    name: 'Default Profile',
+                    type: 'remote',
+                    file: 'default.yaml',
+                    selected: [],
+                  },
+                ],
+              };
+            }
+            if (cmd === 'get_clash_info') return { port: 7890, socks_port: 7891, mixed_port: 7890 };
+            if (cmd === 'get_runtime_state') {
+              return {
+                mode: 'Sidecar',
+                service: 'running',
+                serviceUnavailableReason: null,
+                pendingAction: null,
+                sidecarAllowed: true,
+                isAdmin: false,
+                opInFlight: false,
+                serviceUsable: true,
+                tunCapable: true,
+                serviceNeedsAttention: false,
+              };
+            }
+            if (cmd === 'get_system_proxy') return { enable: false };
+            if (cmd === 'get_app_uptime') return 123456;
+            return null;
+          },
+          transformCallback: (callback, once) => {
+            const id = nextCallbackId++;
+            callbacks.set(id, (data) => {
+              if (once) callbacks.delete(id);
+              callback && callback(data);
+            });
+            return id;
+          },
+          unregisterCallback: (id) => {
+            callbacks.delete(id);
+          },
+          runCallback: (id, data) => {
+            const cb = callbacks.get(id);
+            if (cb) cb(data);
+          },
+          callbacks,
+          convertFileSrc: (path) => path,
+          plugins: {
+            path: { sep: '/', delimiter: ':' },
+          },
+        };
+        window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+          unregisterListener: (event, id) => {
+            callbacks.delete(id);
+          },
+        };
+      }
+    </script>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

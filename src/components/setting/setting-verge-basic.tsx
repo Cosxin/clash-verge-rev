@@ -119,9 +119,7 @@ const SettingVergeBasic = ({ onError }: Props) => {
         </GuardState>
       </SettingItem>
 
-      <SettingItem
-        label={t('settings.components.verge.basic.fields.tvMode')}
-      >
+      <SettingItem label={t('settings.components.verge.basic.fields.tvMode')}>
         <GuardState
           value={verge?.tv_mode ?? 'auto'}
           onCatch={onError}

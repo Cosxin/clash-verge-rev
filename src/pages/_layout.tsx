@@ -14,11 +14,11 @@ import {
   WindowControls,
   WindowResizeHandles,
 } from '@/components/layout/window-controller'
+import { TVRemoteBar } from '@/components/tv/tv-remote-bar'
 import { useI18n } from '@/hooks/use-i18n'
 import { useTVSpatialNav } from '@/hooks/use-tv-spatial-nav'
 import { useVerge } from '@/hooks/use-verge'
 import { useWindowDecorations } from '@/hooks/use-window'
-import { TVRemoteBar } from '@/components/tv/tv-remote-bar'
 import { useThemeMode } from '@/services/states'
 import getSystem from '@/utils/get-system'
 

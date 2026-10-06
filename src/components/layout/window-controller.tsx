@@ -7,8 +7,9 @@ import {
   useImperativeHandle,
 } from 'react'
 
+import { useVerge } from '@/hooks/use-verge'
 import { useWindowControls } from '@/hooks/use-window'
-import getSystem from '@/utils/get-system'
+import getSystem, { isTVMode } from '@/utils/get-system'
 
 const RESIZE_HANDLES = [
   { direction: 'North', position: 'north' },
@@ -65,6 +66,7 @@ export const WindowResizeHandles = () => {
 
 export const WindowControls = forwardRef(function WindowControls(props, ref) {
   const OS = getSystem()
+  const { verge } = useVerge()
   const {
     currentWindow,
     maximized,
@@ -95,7 +97,9 @@ export const WindowControls = forwardRef(function WindowControls(props, ref) {
   )
 
   // 通过前端对 tauri 窗口进行翻转全屏时会短暂地与系统图标重叠渲染。
-  // 这可能是上游缺陷，保险起见跨平台以窗口的最大化翻转为准。
+  if (OS === 'android' || isTVMode(verge?.tv_mode)) {
+    return null
+  }
 
   return (
     <Box

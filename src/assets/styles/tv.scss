@@ -10,32 +10,39 @@ body.tv-mode {
 
   /* Prominent TV Remote D-Pad Focus Ring */
   *:focus-visible,
+  *:focus,
   .Mui-focusVisible,
   .tv-focused {
-    outline: 3px solid var(--primary-main, #5b5c9d) !important;
+    outline: 3px solid var(--primary-main, #3b82f6) !important;
     outline-offset: 2px !important;
-    box-shadow: 0 0 20px rgba(91, 92, 157, 0.75) !important;
-    transform: scale(1.025);
+    box-shadow: 0 0 24px rgba(59, 130, 246, 0.85) !important;
+    transform: scale(1.03);
     transition: transform 0.12s ease-out, box-shadow 0.12s ease-out, outline 0.12s ease-out;
     z-index: 10 !important;
   }
 
   /* Enhanced focus visibility for cards & list items */
+  .MuiCard-root:focus,
   .MuiCard-root:focus-visible,
+  .MuiPaper-root:focus,
   .MuiPaper-root:focus-visible,
+  .MuiListItemButton-root:focus,
   .MuiListItemButton-root:focus-visible {
-    outline: 3px solid var(--primary-main, #5b5c9d) !important;
+    outline: 3px solid var(--primary-main, #3b82f6) !important;
     outline-offset: 2px !important;
     transform: scale(1.03);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 20px rgba(59, 130, 246, 0.7) !important;
   }
 
   /* Enhanced focus visibility for buttons */
+  .MuiButton-root:focus,
   .MuiButton-root:focus-visible,
+  .MuiIconButton-root:focus,
   .MuiIconButton-root:focus-visible {
-    outline: 3px solid var(--primary-main, #5b5c9d) !important;
+    outline: 3px solid var(--primary-main, #3b82f6) !important;
     outline-offset: 2px !important;
     transform: scale(1.08);
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.75) !important;
   }
 
   /* Proxy item focus on TV */

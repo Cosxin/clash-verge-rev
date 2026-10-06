@@ -26,7 +26,13 @@ import type { MonacoEditorInstance, MonacoMarker } from '@/types/monaco'
 import debounce from '@/utils/debounce'
 import { MONACO_FONT_FAMILY } from '@/utils/font-family'
 
-const appWindow = getCurrentWebviewWindow()
+const getAppWindow = () => {
+  try {
+    return getCurrentWebviewWindow()
+  } catch {
+    return null
+  }
+}
 
 type EditorLanguage = 'yaml' | 'javascript' | 'css'
 
@@ -82,7 +88,8 @@ export const EditorViewer = ({
 
   const syncMaximizedState = useCallback(async () => {
     try {
-      setIsMaximized(await appWindow.isMaximized())
+      const appWindow = getAppWindow()
+      setIsMaximized((await appWindow?.isMaximized()) ?? false)
     } catch {
       setIsMaximized(false)
     }
@@ -146,7 +153,8 @@ export const EditorViewer = ({
 
   const handleToggleMaximize = useLockFn(async () => {
     try {
-      await appWindow.toggleMaximize()
+      const appWindow = getAppWindow()
+      await appWindow?.toggleMaximize()
       await syncMaximizedState()
       editorRef.current?.layout()
     } catch (error) {
@@ -176,10 +184,11 @@ export const EditorViewer = ({
       }
     }, 100)
 
-    const unlistenResized = appWindow.onResized(onResized)
+    const appWindow = getAppWindow()
+    const unlistenResized = appWindow?.onResized(onResized)
 
     return () => {
-      unlistenResized.then((unlisten) => unlisten())
+      unlistenResized?.then((unlisten) => unlisten())
     }
   }, [open, syncMaximizedState])
 

@@ -1,9 +1,10 @@
-import { useEffect, useCallback } from 'react'
-import { useNavigate, useLocation } from 'react-router'
-import { isTVMode } from '@/utils/get-system'
+import { useCallback, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router'
+
 import { useVerge } from '@/hooks/use-verge'
 import { patchVergeConfig } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
+import { isTVMode } from '@/utils/get-system'
 
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
@@ -16,7 +17,7 @@ const FOCUSABLE_SELECTOR = [
   '.MuiButtonBase-root:not([disabled])',
   '.MuiListItemButton-root:not([disabled])',
   '.MuiTab-root',
-  '.MuiCard-root',
+  '.MuiSwitch-switchBase:not([disabled])',
   '[data-tv-focusable="true"]',
 ].join(', ')
 
@@ -46,13 +47,31 @@ function getRect(el: HTMLElement): Rect {
 }
 
 function isVisible(el: HTMLElement): boolean {
-  if (el.offsetParent === null && el.tagName !== 'BODY') return false
   const style = window.getComputedStyle(el)
-  if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') {
+  if (
+    style.visibility === 'hidden' ||
+    style.display === 'none' ||
+    style.opacity === '0'
+  ) {
     return false
   }
   const rect = el.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0
+}
+
+const focusElement = (el: HTMLElement) => {
+  if (
+    el.getAttribute('tabindex') === null &&
+    !['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName)
+  ) {
+    el.setAttribute('tabindex', '-1')
+  }
+  document
+    .querySelectorAll('.tv-focused')
+    .forEach((node) => node.classList.remove('tv-focused'))
+  el.classList.add('tv-focused')
+  el.focus()
+  el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
 }
 
 /**
@@ -76,8 +95,30 @@ export function useTVSpatialNav() {
     }
   }, [active])
 
+  // Auto-focus initial element in TV mode
+  useEffect(() => {
+    if (!active) return
+
+    const timer = setTimeout(() => {
+      const activeEl = document.activeElement as HTMLElement | null
+      if (!activeEl || activeEl === document.body) {
+        const first = Array.from(
+          document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).find(isVisible)
+        if (first) {
+          focusElement(first)
+        }
+      }
+    }, 200)
+
+    return () => clearTimeout(timer)
+  }, [active, location.pathname])
+
   const findNextElement = useCallback(
-    (current: HTMLElement, direction: 'up' | 'down' | 'left' | 'right'): HTMLElement | null => {
+    (
+      current: HTMLElement,
+      direction: 'up' | 'down' | 'left' | 'right',
+    ): HTMLElement | null => {
       const allElements = Array.from(
         document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
       ).filter((el) => isVisible(el) && el !== current && !current.contains(el))
@@ -96,31 +137,47 @@ export function useTVSpatialNav() {
 
         switch (direction) {
           case 'up':
-            isValid = targetRect.centerY < curRect.centerY - 4
-            primaryDist = Math.abs(curRect.centerY - targetRect.centerY)
+            isValid =
+              targetRect.bottom < curRect.top + 10 ||
+              targetRect.centerY < curRect.centerY - 4
+            primaryDist =
+              Math.max(0, curRect.top - targetRect.bottom) +
+              Math.abs(curRect.centerY - targetRect.centerY) * 0.4
             secondaryDist = Math.abs(curRect.centerX - targetRect.centerX)
             break
           case 'down':
-            isValid = targetRect.centerY > curRect.centerY + 4
-            primaryDist = Math.abs(targetRect.centerY - curRect.centerY)
+            isValid =
+              targetRect.top > curRect.bottom - 10 ||
+              targetRect.centerY > curRect.centerY + 4
+            primaryDist =
+              Math.max(0, targetRect.top - curRect.bottom) +
+              Math.abs(targetRect.centerY - curRect.centerY) * 0.4
             secondaryDist = Math.abs(curRect.centerX - targetRect.centerX)
             break
           case 'left':
-            isValid = targetRect.centerX < curRect.centerX - 4
-            primaryDist = Math.abs(curRect.centerX - targetRect.centerX)
-            secondaryDist = Math.abs(curRect.centerY - targetRect.centerY)
+            isValid =
+              targetRect.right < curRect.left + 10 ||
+              targetRect.centerX < curRect.centerX - 4
+            primaryDist =
+              Math.max(0, curRect.left - targetRect.right) +
+              Math.abs(curRect.centerX - targetRect.centerX) * 0.4
+            secondaryDist = Math.abs(curRect.centerX - targetRect.centerX)
             break
           case 'right':
-            isValid = targetRect.centerX > curRect.centerX + 4
-            primaryDist = Math.abs(targetRect.centerX - curRect.centerX)
-            secondaryDist = Math.abs(curRect.centerY - targetRect.centerY)
+            isValid =
+              targetRect.left > curRect.right - 10 ||
+              targetRect.centerX > curRect.centerX + 4
+            primaryDist =
+              Math.max(0, targetRect.left - curRect.right) +
+              Math.abs(targetRect.centerX - targetRect.centerX) * 0.4
+            secondaryDist = Math.abs(curRect.centerX - targetRect.centerX)
             break
         }
 
         if (!isValid) continue
 
         // Weighted distance calculation: penalize orthogonal movement to prefer same row/column
-        const distance = primaryDist + secondaryDist * 2.2
+        const distance = primaryDist + secondaryDist * 1.8
         if (distance < minDistance) {
           minDistance = distance
           bestMatch = el
@@ -140,29 +197,59 @@ export function useTVSpatialNav() {
       const isInput =
         activeEl &&
         ['INPUT', 'TEXTAREA'].includes(activeEl.tagName) &&
-        !['button', 'checkbox', 'radio'].includes((activeEl as HTMLInputElement).type)
+        !['button', 'checkbox', 'radio'].includes(
+          (activeEl as HTMLInputElement).type,
+        )
+
+      const isUp =
+        event.key === 'ArrowUp' ||
+        event.key === 'Up' ||
+        event.code === 'ArrowUp' ||
+        event.keyCode === 38 ||
+        event.keyCode === 19
+      const isDown =
+        event.key === 'ArrowDown' ||
+        event.key === 'Down' ||
+        event.code === 'ArrowDown' ||
+        event.keyCode === 40 ||
+        event.keyCode === 20
+      const isLeft =
+        event.key === 'ArrowLeft' ||
+        event.key === 'Left' ||
+        event.code === 'ArrowLeft' ||
+        event.keyCode === 37 ||
+        event.keyCode === 21
+      const isRight =
+        event.key === 'ArrowRight' ||
+        event.key === 'Right' ||
+        event.code === 'ArrowRight' ||
+        event.keyCode === 39 ||
+        event.keyCode === 22
 
       // Handle Directional (D-Pad) keys
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
-        if (isInput && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      if (isUp || isDown || isLeft || isRight) {
+        if (isInput && (isLeft || isRight)) {
           // Allow text navigation inside input
           return
         }
 
-        let direction: 'up' | 'down' | 'left' | 'right' = 'down'
-        if (event.key === 'ArrowUp') direction = 'up'
-        if (event.key === 'ArrowDown') direction = 'down'
-        if (event.key === 'ArrowLeft') direction = 'left'
-        if (event.key === 'ArrowRight') direction = 'right'
+        const direction: 'up' | 'down' | 'left' | 'right' = isUp
+          ? 'up'
+          : isDown
+            ? 'down'
+            : isLeft
+              ? 'left'
+              : 'right'
 
-        let current = activeEl
+        const current = activeEl
         if (!current || current === document.body || !isVisible(current)) {
           // Find first focusable element
-          const first = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).find(isVisible)
+          const first = Array.from(
+            document.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+          ).find(isVisible)
           if (first) {
             event.preventDefault()
-            first.focus()
-            first.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+            focusElement(first)
           }
           return
         }
@@ -170,23 +257,32 @@ export function useTVSpatialNav() {
         const next = findNextElement(current, direction)
         if (next) {
           event.preventDefault()
-          next.focus()
-          next.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+          focusElement(next)
         }
         return
       }
 
       // Handle Remote OK / Enter / Select
-      if (event.key === 'Enter' || event.key === 'Select') {
+      if (
+        event.key === 'Enter' ||
+        event.key === 'Select' ||
+        event.keyCode === 13 ||
+        event.keyCode === 23
+      ) {
         if (activeEl && activeEl !== document.body && !isInput) {
-          // Trigger click on focused element
+          event.preventDefault()
           activeEl.click()
         }
         return
       }
 
       // Handle Remote Back key (Escape / GoBack / Android KEYCODE_BACK)
-      if (event.key === 'Escape' || event.key === 'GoBack' || event.key === 'BrowserBack' || event.keyCode === 4) {
+      if (
+        event.key === 'Escape' ||
+        event.key === 'GoBack' ||
+        event.key === 'BrowserBack' ||
+        event.keyCode === 4
+      ) {
         // If modal/dialog is open, let default Escape handle or dismiss
         const dialog = document.querySelector('.MuiDialog-root, .MuiModal-root')
         if (dialog) {
@@ -202,7 +298,9 @@ export function useTVSpatialNav() {
         }
 
         // If on home and not on sidebar, move focus to sidebar
-        const sidebarItem = document.querySelector<HTMLElement>('.the-menu .MuiListItemButton-root')
+        const sidebarItem = document.querySelector<HTMLElement>(
+          '.the-menu .MuiListItemButton-root',
+        )
         if (sidebarItem && activeEl && !sidebarItem.contains(activeEl)) {
           event.preventDefault()
           sidebarItem.focus()
@@ -211,14 +309,20 @@ export function useTVSpatialNav() {
       }
 
       // Remote Media Play/Pause: toggle proxy
-      if (event.key === 'MediaPlayPause' || event.keyCode === 85 || event.keyCode === 179) {
+      if (
+        event.key === 'MediaPlayPause' ||
+        event.keyCode === 85 ||
+        event.keyCode === 179
+      ) {
         event.preventDefault()
         const currentProxy = verge?.enable_system_proxy ?? false
         patchVergeConfig({ enable_system_proxy: !currentProxy })
           .then(() => {
             showNotice(
               'info',
-              !currentProxy ? 'TV: System Proxy Enabled' : 'TV: System Proxy Disabled',
+              !currentProxy
+                ? 'TV: System Proxy Enabled'
+                : 'TV: System Proxy Disabled',
             )
           })
           .catch((err) => {
@@ -238,11 +342,29 @@ export function useTVSpatialNav() {
       }
     }
 
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && target !== document.body) {
+        document
+          .querySelectorAll('.tv-focused')
+          .forEach((node) => node.classList.remove('tv-focused'))
+        target.classList.add('tv-focused')
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown, true)
+    window.addEventListener('focusin', handleFocusIn, true)
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true)
+      window.removeEventListener('focusin', handleFocusIn, true)
     }
-  }, [active, findNextElement, location.pathname, navigate, verge?.enable_system_proxy])
+  }, [
+    active,
+    findNextElement,
+    location.pathname,
+    navigate,
+    verge?.enable_system_proxy,
+  ])
 
   return { isTV: active }
 }

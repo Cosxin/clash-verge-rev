@@ -99,7 +99,13 @@ const IPInfoCardContainer = forwardRef<HTMLElement, React.PropsWithChildren>(
 export const IpInfoCard = () => {
   const { t } = useTranslation()
   const [showIp, setShowIp] = useState(false)
-  const appWindow = useMemo(() => getCurrentWebviewWindow(), [])
+  const appWindow = useMemo(() => {
+    try {
+      return getCurrentWebviewWindow()
+    } catch {
+      return null
+    }
+  }, [])
 
   // Once intersected, refreshes stay enabled until unmount.
   const [containerRef, hasIntersected, _resetIntersected] = useIntersection({
@@ -128,7 +134,7 @@ export const IpInfoCard = () => {
         hasIntersected &&
         navigator.onLine &&
         countdown.type !== 'revalidating' &&
-        (await appWindow.isVisible())
+        ((await appWindow?.isVisible()) ?? true)
       ) {
         setCountdown({ type: 'revalidating' })
         try {

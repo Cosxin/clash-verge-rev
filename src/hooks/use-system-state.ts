@@ -30,7 +30,7 @@ export function useSystemState() {
   const pageVisible = useVisibility()
 
   const {
-    data: runState = unknownRunState,
+    data: rawRunState,
     refetch: mutateSystemState,
     isLoading,
   } = useQuery({
@@ -41,6 +41,8 @@ export function useSystemState() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
+
+  const runState = rawRunState ?? unknownRunState
 
   return {
     runState,

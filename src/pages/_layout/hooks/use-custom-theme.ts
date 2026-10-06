@@ -66,7 +66,13 @@ ${css}
  * custom theme
  */
 export const useCustomTheme = () => {
-  const appWindow: WebviewWindow = useMemo(() => getCurrentWebviewWindow(), [])
+  const appWindow: WebviewWindow | null = useMemo(() => {
+    try {
+      return getCurrentWebviewWindow()
+    } catch {
+      return null
+    }
+  }, [])
   const { verge } = useVerge()
   const { theme_mode, theme_setting } = verge ?? {}
   const mode = useThemeMode()
@@ -81,7 +87,7 @@ export const useCustomTheme = () => {
   }, [theme_mode, setMode])
 
   useEffect(() => {
-    if (theme_mode !== 'system') {
+    if (theme_mode !== 'system' || !appWindow) {
       return
     }
 
@@ -123,7 +129,7 @@ export const useCustomTheme = () => {
   }, [theme_mode, appWindow, setMode])
 
   useEffect(() => {
-    if (theme_mode === undefined) {
+    if (theme_mode === undefined || !appWindow) {
       return
     }
 
