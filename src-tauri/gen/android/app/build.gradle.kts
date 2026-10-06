@@ -19,7 +19,12 @@ android {
     }
 
     buildTypes {
-        release {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+            isJniDebuggable = true
+        }
+        getByName("release") {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

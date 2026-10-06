@@ -248,7 +248,7 @@ fn handle_singleton_startup(
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), tauri::mobile_entry_point)]
 pub fn run() -> std::process::ExitCode {
     #[cfg(all(target_os = "macos", not(debug_assertions), not(test), not(feature = "verge-dev")))]
     if utils::macos_launch_guard::enforce_before_initialization() == utils::macos_launch_guard::LaunchDisposition::Exit

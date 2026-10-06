@@ -60,7 +60,6 @@ bitflags = { workspace = true }
 socket2 = { workspace = true }
 warp = { version = "0.4.3", features = ["server"] }
 open = "5.4.4"
-rfd = { version = "0.16.0", default-features = false, features = ["common-controls-v6"] }
 dirs = "7.0.0"
 dunce = "1.0.5"
 nanoid = "0.5"
@@ -149,6 +148,7 @@ windows-sys.workspace = true
 tauri-plugin-autostart = "2.7.0"
 tauri-plugin-global-shortcut = "2.4.0"
 tauri-plugin-updater = "2.13.1"
+rfd = { version = "0.16.0", default-features = false, features = ["common-controls-v6"] }
 
 [dev-dependencies]
 criterion = { workspace = true }

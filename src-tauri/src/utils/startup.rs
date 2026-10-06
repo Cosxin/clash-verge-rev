@@ -30,12 +30,19 @@ pub(crate) fn report_error(error: &anyhow::Error) {
         }
     };
 
-    let _ = rfd::MessageDialog::new()
-        .set_level(rfd::MessageLevel::Error)
-        .set_title("Clash Verge startup failed")
-        .set_description(message)
-        .set_buttons(rfd::MessageButtons::Ok)
-        .show();
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let _ = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Clash Verge startup failed")
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .show();
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        eprintln!("[clash-verge] startup failed: {message}");
+    }
 }
 
 fn startup_log_path() -> Result<PathBuf> {

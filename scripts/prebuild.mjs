@@ -190,8 +190,8 @@ const META_ALPHA_MAP = {
   'linux-arm': 'mihomo-linux-armv7',
   'linux-riscv64': 'mihomo-linux-riscv64',
   'linux-loong64': 'mihomo-linux-loong64',
-  'android-arm64': 'mihomo-android-arm64-v8a',
-  'android-arm': 'mihomo-android-armv7a',
+  'android-arm64': 'mihomo-android-arm64-v8',
+  'android-arm': 'mihomo-android-armv7',
   'android-x64': 'mihomo-android-amd64',
   'android-ia32': 'mihomo-android-386',
 }
@@ -208,8 +208,8 @@ const META_MAP = {
   'linux-arm': 'mihomo-linux-armv7',
   'linux-riscv64': 'mihomo-linux-riscv64',
   'linux-loong64': 'mihomo-linux-loong64',
-  'android-arm64': 'mihomo-android-arm64-v8a',
-  'android-arm': 'mihomo-android-armv7a',
+  'android-arm64': 'mihomo-android-arm64-v8',
+  'android-arm': 'mihomo-android-armv7',
   'android-x64': 'mihomo-android-amd64',
   'android-ia32': 'mihomo-android-386',
 }
@@ -544,7 +544,7 @@ const resolveServicePermission = async () => {
           continue
         }
         try {
-          execSync(`chmod 755 ${filePath}`)
+          await fsp.chmod(filePath, 0o755)
           log_success(`chmod finished: "${filePath}"`)
         } catch (e) {
           log_error(`chmod failed for ${filePath}:`, e.message)
@@ -761,7 +761,7 @@ const tasks = [
   // After both sidecar tasks: it hashes what they downloaded.
   { name: 'core_hashes', func: resolveCoreHashes, retry: 1, winOnly: true },
   { name: 'plugin', func: resolvePlugin, retry: 5, winOnly: true },
-  { name: 'service', func: resolveServiceBundle, retry: 5 },
+  { name: 'service', func: resolveServiceBundle, retry: 5, desktopOnly: true },
   { name: 'mmdb', func: resolveMmdb, retry: 5 },
   { name: 'asn_mmdb', func: resolveASNMmdb, retry: 5 },
   { name: 'geosite', func: resolveGeosite, retry: 5 },
@@ -795,6 +795,7 @@ const tasks = [
 async function runTask() {
   const task = tasks.shift()
   if (!task) return
+  if (task.desktopOnly && platform === 'android') return runTask()
   if (task.unixOnly && platform === 'win32') return runTask()
   if (task.winOnly && platform !== 'win32') return runTask()
   if (task.macosOnly && platform !== 'darwin') return runTask()

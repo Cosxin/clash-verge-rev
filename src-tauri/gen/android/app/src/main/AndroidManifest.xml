@@ -66,6 +66,9 @@
                 <data android:scheme="clash" />
                 <data android:scheme="clash-verge" />
             </intent-filter>
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
+            
+            <!-- DEEP LINK PLUGIN. AUTO-GENERATED. DO NOT REMOVE. -->
         </activity>
     </application>
 

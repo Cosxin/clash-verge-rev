@@ -1,9 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "identifier": "io.github.clash_verge_rev.clash_verge_rev",
+  "identifier": "io.github.clash-verge-rev.clash-verge-rev",
   "productName": "Clash Verge",
   "bundle": {
-    "targets": ["apk", "aab"],
     "android": {
       "minSdkVersion": 24,
       "versionCode": 25800
@@ -11,10 +10,7 @@
   },
   "app": {
     "security": {
-      "capabilities": [
-        "android-capability",
-        "migrated"
-      ]
+      "capabilities": ["android-capability", "migrated"]
     }
   }
 }
