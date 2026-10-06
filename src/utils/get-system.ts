@@ -1,6 +1,11 @@
 // get the system os
 // according to UA
-export default function getSystem(): 'macos' | 'windows' | 'android' | 'linux' | 'unknown' {
+export default function getSystem():
+  | 'macos'
+  | 'windows'
+  | 'android'
+  | 'linux'
+  | 'unknown' {
   const ua = navigator.userAgent
   const platform = OS_PLATFORM
 
@@ -18,7 +23,7 @@ export default function getSystem(): 'macos' | 'windows' | 'android' | 'linux' |
 /**
  * Detect whether the current environment is Android TV
  */
-export function isAndroidTV(): boolean {
+function isAndroidTV(): boolean {
   if (typeof window === 'undefined' || !navigator) return false
   const ua = navigator.userAgent || ''
 

@@ -140,5 +140,11 @@
       "warn": "WARN",
       "error": "ERROR"
     }
+  },
+  "tv": {
+    "move": "移动",
+    "select": "选择",
+    "back": "返回",
+    "proxy": "代理"
   }
 }

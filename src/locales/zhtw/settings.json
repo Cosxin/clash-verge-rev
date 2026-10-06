@@ -166,9 +166,15 @@
           "showTrayMenu": "顯示系統匣選單",
           "disable": "停用"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "語言設定",
           "themeMode": "主題模式",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "系統匣點擊事件",
           "copyEnvType": "複製環境變數類型",
           "startPage": "啟動頁面",

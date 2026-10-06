@@ -166,9 +166,15 @@
           "showTrayMenu": "Show Tray Menu",
           "disable": "تعطيل"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "اللغة",
           "themeMode": "وضع السمة",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "حدث النقر على الأيقونة في شريط المهام",
           "copyEnvType": "نسخ نوع البيئة",
           "startPage": "صفحة البدء",

@@ -734,12 +734,18 @@ export interface TranslationResources {
               themeMode: string
               themeSetting: string
               trayClickEvent: string
+              tvMode: string
             }
             title: string
             trayOptions: {
               disable: string
               showMainWindow: string
               showTrayMenu: string
+            }
+            tvOptions: {
+              always: string
+              auto: string
+              off: string
             }
           }
           layout: {
@@ -1531,6 +1537,12 @@ export interface TranslationResources {
         enabled: string
         loading: string
         saving: string
+      }
+      tv: {
+        back: string
+        move: string
+        proxy: string
+        select: string
       }
       units: {
         files: string

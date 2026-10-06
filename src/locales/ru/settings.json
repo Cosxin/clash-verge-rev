@@ -166,9 +166,15 @@
           "showTrayMenu": "Показать меню в трее",
           "disable": "Отключить"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "Язык",
           "themeMode": "Цветовая тема",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "Событие при щелчке по иконке в трее",
           "copyEnvType": "Скопировать тип Env",
           "startPage": "Главная страница",

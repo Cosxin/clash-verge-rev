@@ -166,9 +166,15 @@
           "showTrayMenu": "Mostrar menú de la bandeja",
           "disable": "Deshabilitar"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "Configuración de idioma",
           "themeMode": "Modo de tema",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "Evento de clic en el icono de la bandeja",
           "copyEnvType": "Copiar tipo de variable de entorno",
           "startPage": "Página de inicio",

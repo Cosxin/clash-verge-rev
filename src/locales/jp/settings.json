@@ -166,9 +166,15 @@
           "showTrayMenu": "トレイメニューを表示",
           "disable": "無効にする"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "言語設定",
           "themeMode": "テーマモード",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "トレイアイコンクリックイベント",
           "copyEnvType": "環境変数タイプをコピー",
           "startPage": "起動ページ",

@@ -166,9 +166,15 @@
           "showTrayMenu": "Show Tray Menu",
           "disable": "Сүндерү"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "Тел",
           "themeMode": "Теманың режимы",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "Трейдагы басу вакыйгасы",
           "copyEnvType": "Env төрен күчереп алу",
           "startPage": "Баш бит",

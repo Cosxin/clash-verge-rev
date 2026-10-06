@@ -166,9 +166,15 @@
           "showTrayMenu": "Tepsi Menüsünü Göster",
           "disable": "Devre Dışı Bırak"
         },
+        "tvOptions": {
+          "auto": "Auto Detect",
+          "always": "Always On",
+          "off": "Off"
+        },
         "fields": {
           "language": "Dil",
           "themeMode": "Tema Modu",
+          "tvMode": "Android TV Mode",
           "trayClickEvent": "Sistem Tepsisi Tıklama Olayı",
           "copyEnvType": "Env Tipini Kopyala",
           "startPage": "Başlangıç Sayfası",

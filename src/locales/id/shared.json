@@ -140,5 +140,11 @@
       "warn": "WARN",
       "error": "ERROR"
     }
+  },
+  "tv": {
+    "move": "Move",
+    "select": "Select",
+    "back": "Back",
+    "proxy": "Proxy"
   }
 }

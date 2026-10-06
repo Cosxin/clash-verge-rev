@@ -1,5 +1,6 @@
 import { Box, Typography } from '@mui/material'
 import { useTranslation } from 'react-i18next'
+
 import { useVerge } from '@/hooks/use-verge'
 import { isTVMode } from '@/utils/get-system'
 
@@ -33,38 +34,86 @@ export const TVRemoteBar = () => {
       }}
     >
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.2)', px: 0.8, py: 0.2, borderRadius: 1 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            bgcolor: 'rgba(255,255,255,0.2)',
+            px: 0.8,
+            py: 0.2,
+            borderRadius: 1,
+          }}
+        >
           ▲▼◀▶
         </Typography>
-        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          {t('tv.bar.move', 'Move')}
+        <Typography
+          variant="caption"
+          sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
+        >
+          {t('shared.tv.move')}
         </Typography>
       </Box>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.2)', px: 0.8, py: 0.2, borderRadius: 1 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            bgcolor: 'rgba(255,255,255,0.2)',
+            px: 0.8,
+            py: 0.2,
+            borderRadius: 1,
+          }}
+        >
           OK
         </Typography>
-        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          {t('tv.bar.select', 'Select')}
+        <Typography
+          variant="caption"
+          sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
+        >
+          {t('shared.tv.select')}
         </Typography>
       </Box>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.2)', px: 0.8, py: 0.2, borderRadius: 1 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            bgcolor: 'rgba(255,255,255,0.2)',
+            px: 0.8,
+            py: 0.2,
+            borderRadius: 1,
+          }}
+        >
           BACK
         </Typography>
-        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          {t('tv.bar.back', 'Back')}
+        <Typography
+          variant="caption"
+          sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
+        >
+          {t('shared.tv.back')}
         </Typography>
       </Box>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-        <Typography variant="caption" sx={{ fontWeight: 700, bgcolor: 'rgba(255,255,255,0.2)', px: 0.8, py: 0.2, borderRadius: 1 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            fontWeight: 700,
+            bgcolor: 'rgba(255,255,255,0.2)',
+            px: 0.8,
+            py: 0.2,
+            borderRadius: 1,
+          }}
+        >
           ▶||
         </Typography>
-        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          {t('tv.bar.proxy', 'Proxy')}
+        <Typography
+          variant="caption"
+          sx={{ color: 'rgba(255, 255, 255, 0.9)' }}
+        >
+          {t('shared.tv.proxy')}
         </Typography>
       </Box>
     </Box>
