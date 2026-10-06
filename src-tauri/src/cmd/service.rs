@@ -19,10 +19,10 @@ pub enum ServiceInstallOutcome {
 }
 
 async fn execute_service_operation_sync(status: ServiceStatus, error_code: &str) -> CmdResult<ServiceInstallOutcome> {
-    if cfg!(feature = "network-dev") {
+    if cfg!(feature = "network-control") {
         return Err(super::coded_error(
             "NETWORK_DEV_ISOLATION",
-            "Privileged service changes are disabled in NetworkControl Dev",
+            "Privileged service changes are unavailable in this NetworkControl build",
         ));
     }
     let manager = CoreManager::global();
@@ -94,10 +94,10 @@ pub async fn install_service() -> CmdResult<ServiceInstallOutcome> {
 
 #[tauri::command]
 pub async fn uninstall_service() -> CmdResult {
-    if cfg!(feature = "network-dev") {
+    if cfg!(feature = "network-control") {
         return Err(super::coded_error(
             "NETWORK_DEV_ISOLATION",
-            "Privileged service changes are disabled in NetworkControl Dev",
+            "Privileged service changes are unavailable in this NetworkControl build",
         ));
     }
     CoreManager::global()
@@ -160,9 +160,9 @@ mod tests {
     };
     use std::cell::Cell;
 
-    #[cfg(feature = "network-dev")]
+    #[cfg(feature = "network-control")]
     #[tokio::test]
-    async fn network_dev_service_changes_reject_before_manager_initialization() {
+    async fn network_control_service_changes_reject_before_manager_initialization() {
         for result in [
             super::install_service().await,
             super::reinstall_service().await,

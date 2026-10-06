@@ -28,6 +28,21 @@ use tokio::{sync::Mutex, time::timeout};
 const CLEAR_ATTEMPTS: u32 = 3;
 const CLEAR_RETRY_DELAY: Duration = Duration::from_millis(100);
 
+tokio::task_local! {
+    static EXPLICIT_PROXY_REQUEST: bool;
+}
+
+pub(crate) fn is_explicit_proxy_request() -> bool {
+    EXPLICIT_PROXY_REQUEST.try_with(|explicit| *explicit).unwrap_or(false)
+}
+
+pub(crate) async fn with_proxy_request<F>(explicit: bool, operation: F) -> Result<()>
+where
+    F: Future<Output = Result<()>>,
+{
+    EXPLICIT_PROXY_REQUEST.scope(explicit, operation).await
+}
+
 /// Actionable system-proxy failure attached to an `anyhow` chain.
 ///
 /// Classification remains downcastable while the original error stays available for diagnostics.
@@ -489,6 +504,9 @@ fn table_effect(result: &Result<()>) -> TableEffect<'_> {
 #[tracing::instrument(skip_all, level = "info", fields(route = tracing::field::Empty))]
 pub async fn apply() -> Result<()> {
     ensure_host_proxy_mutation_allowed()?;
+    if cfg!(feature = "network-control") && !is_explicit_proxy_request() && !Sysopt::global().owns_user_proxy() {
+        return Ok(());
+    }
     let running_mode = CoreManager::global().get_running_mode();
     let verge = Config::verge().await.latest_arc();
     let route = proxy_backend_route(cfg!(target_os = "macos"), &running_mode);
@@ -565,6 +583,9 @@ async fn clear_with_retry() -> Result<()> {
 
 #[tracing::instrument(skip_all, level = "info", fields(route = tracing::field::Empty))]
 async fn clear_inner() -> Result<()> {
+    if cfg!(feature = "network-control") {
+        return Sysopt::global().reset_sysproxy().await.map_err(classify_local_failure);
+    }
     let running_mode = CoreManager::global().get_running_mode();
     let route = proxy_backend_route(cfg!(target_os = "macos"), &running_mode);
     tracing::Span::current().record("route", tracing::field::debug(&route));
@@ -585,6 +606,10 @@ async fn clear_inner() -> Result<()> {
 
 pub async fn refresh_guard() -> Result<()> {
     ensure_host_proxy_mutation_allowed()?;
+    if cfg!(feature = "network-control") {
+        Sysopt::global().stop_proxy_guard().await;
+        return Ok(());
+    }
     let (generation, _drained) = SERVICE_PROXY_OPERATIONS
         .cancel_and_drain(|| Sysopt::global().stop_proxy_guard())
         .await;
@@ -692,6 +717,18 @@ mod tests {
     };
     use std::task::Poll;
     use tokio::sync::Barrier;
+
+    #[tokio::test]
+    async fn user_proxy_intent_is_scoped_to_the_explicit_toggle() -> anyhow::Result<()> {
+        assert!(!super::is_explicit_proxy_request());
+        super::with_proxy_request(true, async {
+            assert!(super::is_explicit_proxy_request());
+            Ok(())
+        })
+        .await?;
+        assert!(!super::is_explicit_proxy_request());
+        Ok(())
+    }
 
     #[cfg(feature = "network-dev")]
     #[tokio::test]

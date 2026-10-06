@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
 
+import { useBuildCapabilities } from '@/hooks/use-build-capabilities'
 import { useServiceInstaller } from '@/hooks/use-service-installer'
 import { useSystemState } from '@/hooks/use-system-state'
 import {
@@ -33,6 +34,7 @@ export const SystemInfoCard = () => {
   const { runningMode, isAdminMode, isSidecarMode, mutateSystemState } =
     useSystemState()
   const { installServiceAndRestartCore } = useServiceInstaller()
+  const { autostartLocked, serviceLocked } = useBuildCapabilities()
 
   const { checkUpdate: triggerCheckUpdate, lastCheckUpdate } = useUpdate(true)
 
@@ -77,15 +79,16 @@ export const SystemInfoCard = () => {
   }, [navigate])
 
   const toggleAutoLaunch = useCallback(async () => {
-    if (!verge) return
+    if (!verge || autostartLocked) return
     try {
       await patchVerge({ enable_auto_launch: !verge.enable_auto_launch })
     } catch (err) {
       console.error('切换开机自启动状态失败:', err)
     }
-  }, [verge, patchVerge])
+  }, [verge, patchVerge, autostartLocked])
 
   const handleRunningModeClick = useCallback(async () => {
+    if (serviceLocked) return
     if (isSidecarMode || (isAdminMode && isSidecarMode)) {
       await installServiceAndRestartCore()
       await mutateSystemState()
@@ -95,6 +98,7 @@ export const SystemInfoCard = () => {
     isAdminMode,
     installServiceAndRestartCore,
     mutateSystemState,
+    serviceLocked,
   ])
 
   const onCheckUpdate = useLockFn(async () => {
@@ -122,18 +126,16 @@ export const SystemInfoCard = () => {
 
   const runningModeStyle = useMemo(
     () => ({
-      cursor:
-        isSidecarMode || (isAdminMode && isSidecarMode) ? 'pointer' : 'default',
-      textDecoration:
-        isSidecarMode || (isAdminMode && isSidecarMode) ? 'underline' : 'none',
+      cursor: !serviceLocked && isSidecarMode ? 'pointer' : 'default',
+      textDecoration: !serviceLocked && isSidecarMode ? 'underline' : 'none',
       display: 'flex',
       alignItems: 'center',
       gap: 0.5,
       '&:hover': {
-        opacity: isSidecarMode || (isAdminMode && isSidecarMode) ? 0.7 : 1,
+        opacity: !serviceLocked && isSidecarMode ? 0.7 : 1,
       },
     }),
-    [isSidecarMode, isAdminMode],
+    [isSidecarMode, serviceLocked],
   )
 
   const getModeIcon = () => {
@@ -243,8 +245,9 @@ export const SystemInfoCard = () => {
               }
               color={autoLaunchEnabled ? 'success' : 'default'}
               variant={autoLaunchEnabled ? 'filled' : 'outlined'}
-              onClick={toggleAutoLaunch}
-              sx={{ cursor: 'pointer' }}
+              disabled={autostartLocked}
+              onClick={autostartLocked ? undefined : toggleAutoLaunch}
+              sx={{ cursor: autostartLocked ? 'default' : 'pointer' }}
             />
           </Stack>
         </Stack>
@@ -258,7 +261,7 @@ export const SystemInfoCard = () => {
           </Typography>
           <Typography
             variant="body2"
-            onClick={handleRunningModeClick}
+            onClick={serviceLocked ? undefined : handleRunningModeClick}
             sx={{ ...runningModeStyle, fontWeight: 'medium' }}
           >
             {getModeIcon()}

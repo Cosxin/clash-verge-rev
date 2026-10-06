@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import iconDark from '@/assets/image/icon_dark.svg?react'
 import iconLight from '@/assets/image/icon_light.svg?react'
 import LogoSvg from '@/assets/image/logo.svg?react'
+import { useBuildCapabilities } from '@/hooks/use-build-capabilities'
 import { useVerge } from '@/hooks/use-verge'
 import { useNavMenuOrder } from '@/pages/_layout/hooks'
 import { navItems } from '@/pages/_navigation'
@@ -29,6 +30,7 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
   const { isDark, isCollapsed } = props
   const { t } = useTranslation()
   const { verge, mutateVerge, patchVerge } = useVerge()
+  const { flavor } = useBuildCapabilities()
   const [menuUnlocked, setMenuUnlocked] = useState(false)
   const [menuContextPosition, setMenuContextPosition] =
     useState<MenuContextPosition | null>(null)
@@ -144,7 +146,24 @@ export const LayoutSidebar = (props: LayoutSidebarProps) => {
             }}
             inheritViewBox
           />
-          <LogoSvg fill={isDark ? 'white' : 'black'} />
+          {flavor === 'network-control' || flavor === 'network-dev' ? (
+            <Box
+              component="span"
+              data-tauri-drag-region="true"
+              sx={{
+                fontSize: 16,
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                alignSelf: 'center',
+              }}
+            >
+              {flavor === 'network-dev'
+                ? 'NetworkControl Dev'
+                : 'NetworkControl'}
+            </Box>
+          ) : (
+            <LogoSvg fill={isDark ? 'white' : 'black'} />
+          )}
         </div>
         <UpdateButton className="the-newbtn" />
       </div>

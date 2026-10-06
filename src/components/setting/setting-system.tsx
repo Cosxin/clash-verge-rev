@@ -21,7 +21,7 @@ const SettingSystem = ({ onError }: Props) => {
   const { verge, mutateVerge, patchVerge } = useVerge()
 
   const { enable_auto_launch, enable_silent_start } = verge ?? {}
-  const { hostLocked } = useBuildCapabilities()
+  const { autostartLocked } = useBuildCapabilities()
 
   const sysproxyRef = useRef<DialogRef>(null)
   const tunRef = useRef<DialogRef>(null)
@@ -71,7 +71,7 @@ const SettingSystem = ({ onError }: Props) => {
             }
           }}
         >
-          <Switch edge="end" disabled={hostLocked} />
+          <Switch edge="end" disabled={autostartLocked} />
         </GuardState>
       </SettingItem>
 

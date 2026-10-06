@@ -27,11 +27,13 @@ import { useTranslation } from 'react-i18next'
 
 import { BasePage } from '@/components/base'
 import { ClashModeCard } from '@/components/home/clash-mode-card'
+import { ConnectCard } from '@/components/home/connect-card'
 import { CurrentProxyCard } from '@/components/home/current-proxy-card'
 import { EnhancedCard } from '@/components/home/enhanced-card'
 import { EnhancedTrafficStats } from '@/components/home/enhanced-traffic-stats'
 import { HomeProfileCard } from '@/components/home/home-profile-card'
 import { ProxyTunCard } from '@/components/home/proxy-tun-card'
+import { useBuildCapabilities } from '@/hooks/use-build-capabilities'
 import { useProfiles } from '@/hooks/use-profiles'
 import { useVerge } from '@/hooks/use-verge'
 import { entry_lightweight_mode } from '@/services/cmds'
@@ -233,6 +235,8 @@ const HomePage = () => {
   const { t } = useTranslation()
   const { verge } = useVerge()
   const { current, mutateProfiles } = useProfiles()
+  const { flavor } = useBuildCapabilities()
+  const optionalProbes = flavor === 'upstream'
 
   // 设置弹窗的状态
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -292,18 +296,20 @@ const HomePage = () => {
         </EnhancedCard>,
         12,
       ),
-      renderCard(
-        'test',
-        <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
-          <LazyTestCard />
-        </Suspense>,
-      ),
-      renderCard(
-        'ip',
-        <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
-          <LazyIpInfoCard />
-        </Suspense>,
-      ),
+      optionalProbes &&
+        renderCard(
+          'test',
+          <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
+            <LazyTestCard />
+          </Suspense>,
+        ),
+      optionalProbes &&
+        renderCard(
+          'ip',
+          <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
+            <LazyIpInfoCard />
+          </Suspense>,
+        ),
       renderCard(
         'clashinfo',
         <Suspense fallback={<Skeleton variant="rectangular" height={200} />}>
@@ -317,7 +323,7 @@ const HomePage = () => {
         </Suspense>,
       ),
     ],
-    [t, renderCard],
+    [t, renderCard, optionalProbes],
   )
   return (
     <BasePage
@@ -348,6 +354,9 @@ const HomePage = () => {
       }
     >
       <Grid container spacing={1.5} columns={{ xs: 6, sm: 6, md: 12 }}>
+        <Grid size={12}>
+          <ConnectCard />
+        </Grid>
         {criticalCards}
 
         {nonCriticalCards}

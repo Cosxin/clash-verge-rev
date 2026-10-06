@@ -14,6 +14,7 @@
 - Preserve ordinary WebSocket transport when importing VLESS links.
 - Keep failed proxy links and their credentials out of diagnostic logs.
 - Disable connection switches that the developer build cannot use.
+- Start NetworkControl without changing unowned proxy settings or adopting an installed Clash service.
 
 **🖥️ Windows**
 
@@ -36,6 +37,7 @@
 - Add reviewed `.lsrules` import/export with unsupported-rule and precedence-conflict diagnostics.
 - Add an isolated NetworkControl developer build with a stable-only core and no upstream updater or privileged-service changes.
 - Add a separate NetworkControl user build while keeping native firewall changes unavailable.
+- Add Home Connect/Disconnect with observed connection status and explicit proxy-replacement confirmation.
 - Add visual application-to-server/group routing and a default route with explicit, profile-bound core application.
 - Add authenticated native ban adapters for macOS, Windows and Linux, with unavailable states until installation and runtime qualification.
 - Preserve native source/destination and process evidence in history; keep overlapping native/core traffic counters separate.

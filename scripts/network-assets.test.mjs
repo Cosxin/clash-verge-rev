@@ -16,6 +16,12 @@ const config = JSON.parse(
     'utf8',
   ),
 )
+const userConfig = JSON.parse(
+  await fs.readFile(
+    path.join(repo, 'src-tauri/tauri.network.conf.json'),
+    'utf8',
+  ),
+)
 
 test('all six native target mappings pin official stable assets and exact source commits', () => {
   assert.equal(Object.keys(pins.targets).length, 6)
@@ -46,6 +52,27 @@ test('developer bundle has isolated identity, stable only, and no upstream updat
   assert.deepEqual(config.plugins['deep-link'].desktop.schemes, [])
   assert.equal(config.bundle.macOS.infoPlist, null)
   assert.equal(config.bundle.macOS.exceptionDomain, null)
+})
+
+test('user bundle keeps its own identity and omits upstream service tools, scheme and updates', () => {
+  assert.equal(userConfig.identifier, 'io.github.cosxin.network-control')
+  assert.notEqual(userConfig.identifier, config.identifier)
+  assert.equal(userConfig.productName, 'NetworkControl')
+  assert.equal(userConfig.mainBinaryName, 'network-control')
+  assert.deepEqual(userConfig.bundle.externalBin, ['sidecar/verge-mihomo'])
+  assert.deepEqual(userConfig.bundle.resources, [
+    'resources/network-assets-*.json',
+    '../LICENSE',
+  ])
+  assert.equal(userConfig.bundle.category, 'Utility')
+  assert.equal(userConfig.bundle.createUpdaterArtifacts, false)
+  assert.deepEqual(userConfig.plugins.updater.endpoints, [])
+  assert.equal(userConfig.plugins.updater.pubkey, '')
+  assert.deepEqual(userConfig.plugins['deep-link'].desktop.schemes, [
+    'networkcontrol',
+  ])
+  assert.equal(userConfig.bundle.macOS.infoPlist, null)
+  assert.equal(userConfig.bundle.macOS.exceptionDomain, null)
 })
 
 test('corrupted cached archive fails before staging or downloading', async () => {

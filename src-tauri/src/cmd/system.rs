@@ -15,6 +15,10 @@ pub async fn get_runtime_state() -> Result<RunStateView, String> {
 pub struct BuildCapabilities {
     flavor: &'static str,
     host_network_changes: bool,
+    system_proxy: bool,
+    tun: bool,
+    service: bool,
+    autostart: bool,
 }
 
 #[tauri::command]
@@ -28,6 +32,10 @@ pub const fn get_build_capabilities() -> BuildCapabilities {
             "upstream"
         },
         host_network_changes: !cfg!(feature = "network-dev"),
+        system_proxy: !cfg!(feature = "network-dev"),
+        tun: !cfg!(feature = "network-control"),
+        service: !cfg!(feature = "network-control"),
+        autostart: !cfg!(feature = "network-control"),
     }
 }
 

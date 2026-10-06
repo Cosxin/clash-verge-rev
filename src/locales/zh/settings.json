@@ -36,7 +36,8 @@
         "tunUnavailable": "TUN 模式需要安装服务模式或管理员模式",
         "hostChangesDisabled": "此开发者版本已关闭连接功能，请使用 NetworkControl 正式版进行连接。",
         "capabilitiesLoading": "正在检查可用的连接功能…",
-        "capabilitiesUnavailable": "无法检查连接功能，请重新打开应用或查看诊断信息。"
+        "capabilitiesUnavailable": "无法检查连接功能，请重新打开应用或查看诊断信息。",
+        "userBuildRestrictions": "此版本仅支持系统代理，暂不提供 TUN、特权服务安装及开机自启。"
       },
       "actions": {
         "installService": "安装服务",

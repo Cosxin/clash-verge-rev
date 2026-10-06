@@ -36,7 +36,8 @@
         "tunUnavailable": "TUN requires Service Mode or Admin Mode",
         "hostChangesDisabled": "Connecting is turned off in this developer build. Use the NetworkControl app to connect.",
         "capabilitiesLoading": "Checking available connection controls…",
-        "capabilitiesUnavailable": "Connection controls could not be checked. Reopen the app or check diagnostics."
+        "capabilitiesUnavailable": "Connection controls could not be checked. Reopen the app or check diagnostics.",
+        "userBuildRestrictions": "This build supports System Proxy only. TUN, privileged service installation and autostart are unavailable."
       },
       "actions": {
         "installService": "Install Service",

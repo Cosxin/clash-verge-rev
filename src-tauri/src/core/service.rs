@@ -865,6 +865,9 @@ pub(super) fn record_residual_service(error: &anyhow::Error) {
 /// 尝试使用服务启动core
 #[tracing::instrument(skip_all, level = "info", fields(generation = tracing::field::Empty, staging = tracing::field::Empty, code = tracing::field::Empty, outcome = tracing::field::Empty))]
 pub(super) async fn start_with_existing_service(config_file: &Path) -> Result<()> {
+    if cfg!(feature = "network-control") {
+        bail!("This NetworkControl build does not adopt an existing privileged service");
+    }
     clear_active_service_session();
 
     let credentials = current_owner_credentials()?;
@@ -1425,6 +1428,9 @@ async fn discard_fetched(fetched: Vec<FetchedCache>) {
 /// 通过服务停止core
 #[tracing::instrument(skip_all, level = "info", fields(code = tracing::field::Empty, outcome = tracing::field::Empty))]
 pub(super) async fn stop_core_by_service() -> Result<()> {
+    if cfg!(feature = "network-control") {
+        bail!("This NetworkControl build does not control a privileged service");
+    }
     cancel_owner_monitors();
 
     let credentials = match current_owner_credentials() {
@@ -1498,6 +1504,9 @@ pub(crate) async fn update_writer_by_service(writer: &WriterConfig) -> Result<()
 }
 
 pub(super) async fn set_system_proxy_by_service(proxy: &MacosProxyConfig) -> Result<ProxyApplyOutcome> {
+    if cfg!(feature = "network-control") {
+        bail!("This NetworkControl build does not control a privileged service");
+    }
     let session = active_service_session()?;
     set_system_proxy_by_service_with_session(proxy, &session).await
 }
@@ -1808,10 +1817,16 @@ impl ServiceManager {
     }
 
     pub async fn confirm_ready(&self) -> Result<()> {
+        if cfg!(feature = "network-control") {
+            bail!("The isolated NetworkControl build does not use a privileged service");
+        }
         RUN_STATE.probe().await.map(|_| ())
     }
 
     pub async fn current(&self) -> ServiceStatus {
+        if cfg!(feature = "network-control") {
+            return ServiceStatus::SidecarAllowed;
+        }
         ServiceStatus::from_run_state(&RUN_STATE.settled().await)
     }
 
@@ -1828,7 +1843,7 @@ impl ServiceManager {
     }
 
     pub async fn detect_startup_status(&self) {
-        if cfg!(feature = "dev-sidecar") {
+        if cfg!(feature = "dev-sidecar") || cfg!(feature = "network-control") {
             RUN_STATE.accept_sidecar();
             return;
         }
@@ -1858,8 +1873,8 @@ impl ServiceManager {
     }
 
     pub async fn handle_service_status(&self, status: ServiceStatus) -> Result<()> {
-        if cfg!(feature = "network-dev") {
-            bail!("Privileged service changes are disabled in NetworkControl Dev");
+        if cfg!(feature = "network-control") {
+            bail!("Privileged service changes are unavailable in this NetworkControl build");
         }
         // Box the large operation future once instead of carrying it in every calling command.
         self.run_operation(Box::pin(self.apply_service_status(status))).await

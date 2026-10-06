@@ -64,6 +64,39 @@ export interface TranslationResources {
             rule: string
           }
         }
+        connect: {
+          actions: {
+            addServers: string
+            chooseServer: string
+            connect: string
+            disconnect: string
+          }
+          confirm: {
+            description: string
+            title: string
+          }
+          errors: {
+            change: string
+          }
+          fields: {
+            profile: string
+          }
+          hints: {
+            coreUnavailable: string
+            noProfile: string
+            scope: string
+            tun: string
+            tunUnavailable: string
+          }
+          status: {
+            coreUnavailable: string
+            direct: string
+            disconnected: string
+            enabled: string
+            unknown: string
+          }
+          title: string
+        }
         currentProxy: {
           actions: {
             refreshDelay: string
@@ -1560,6 +1593,7 @@ export interface TranslationResources {
             systemProxy: string
             tunMode: string
             tunUnavailable: string
+            userBuildRestrictions: string
           }
         }
         system: {

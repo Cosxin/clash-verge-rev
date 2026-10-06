@@ -453,6 +453,10 @@ export const getRuntimeState = async () => {
 export interface BuildCapabilities {
   flavor: 'network-dev' | 'network-control' | 'upstream'
   hostNetworkChanges: boolean
+  systemProxy: boolean
+  tun: boolean
+  service: boolean
+  autostart: boolean
 }
 
 export const getBuildCapabilities = async () => {

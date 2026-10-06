@@ -27,6 +27,37 @@
     "title": "Home"
   },
   "components": {
+    "connect": {
+      "title": "Connection",
+      "status": {
+        "enabled": "System proxy enabled",
+        "direct": "System proxy enabled · Direct mode (no VPN)",
+        "coreUnavailable": "System proxy enabled · Core unavailable",
+        "unknown": "System proxy state unavailable",
+        "disconnected": "System proxy disconnected"
+      },
+      "fields": { "profile": "Selected profile: {{name}}" },
+      "actions": {
+        "addServers": "Add servers",
+        "chooseServer": "Choose server",
+        "connect": "Connect",
+        "disconnect": "Disconnect"
+      },
+      "hints": {
+        "noProfile": "Import and activate a profile to choose your servers.",
+        "coreUnavailable": "The local core must be ready before connecting. Check Network Settings if it remains unavailable.",
+        "scope": "Connect enables System Proxy for apps that follow OS proxy settings; routes depend on your profile and mode. Server reachability is not verified. Disconnect resets System Proxy, not the proxy settings used before this app.",
+        "tun": "TUN is requested separately; this is not proof that it is active. Disconnect also turns off the TUN request.",
+        "tunUnavailable": "A saved TUN preference is present, but this build cannot activate TUN. Connect and Disconnect control System Proxy only."
+      },
+      "errors": {
+        "change": "Could not complete or confirm the request. Check Network Settings before retrying."
+      },
+      "confirm": {
+        "title": "Enable System Proxy?",
+        "description": "This replaces the current system proxy or PAC settings. Earlier settings are not automatically restored on Disconnect, Quit, or after a crash. Continue only if you are ready to restore another proxy manually."
+      }
+    },
     "proxyTun": {
       "status": {
         "systemProxyEnabled": "System Proxy Enabled",

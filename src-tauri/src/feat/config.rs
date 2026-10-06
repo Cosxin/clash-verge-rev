@@ -230,9 +230,10 @@ async fn process_terminated_flags(update_flags: UpdateFlags, patch: &IVerge) -> 
             .enable_system_proxy
             .unwrap_or_default()
         {
-            manager.apply_proxy_after_start().await?;
+            proxy_control::with_proxy_request(patch.enable_system_proxy.is_some(), manager.apply_proxy_after_start())
+                .await?;
         } else {
-            proxy_control::apply().await?;
+            proxy_control::with_proxy_request(patch.enable_system_proxy.is_some(), proxy_control::apply()).await?;
             proxy_control::refresh_guard().await?;
         }
     }
@@ -307,6 +308,11 @@ pub(super) async fn apply_verge_patch_locked(
                 && patch.enable_system_proxy != Some(true)
                 && patch.enable_auto_launch != Some(true)),
         "System proxy, TUN and autostart activation are disabled in NetworkControl Dev"
+    );
+    anyhow::ensure!(
+        !cfg!(feature = "network-control")
+            || (patch.enable_tun_mode != Some(true) && patch.enable_auto_launch != Some(true)),
+        "TUN and autostart are unavailable in this NetworkControl build; use System Proxy"
     );
     let verge = Config::verge().await;
     // Hold the claim across side effects so concurrent transactions cannot share this draft.

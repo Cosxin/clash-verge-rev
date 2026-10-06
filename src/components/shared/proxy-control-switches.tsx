@@ -139,7 +139,8 @@ const ProxyControlSwitches = ({
   const { indicator: systemProxyIndicator, toggleSystemProxy } =
     useSystemProxyState()
   const { runState, isTunModeAvailable, isLoading } = useSystemState()
-  const { hostLocked, flavor, unavailable } = useBuildCapabilities()
+  const { hostLocked, tunLocked, serviceLocked, flavor, unavailable } =
+    useBuildCapabilities()
   // Offer to uninstall only a service that is actually there and working.
   const isServiceInstallReady = runState.serviceUsable
 
@@ -150,6 +151,7 @@ const ProxyControlSwitches = ({
 
   // Enabling needs a running core; disabling only writes OS state and must stay available.
   const handleSystemProxyToggle = async (value: boolean) => {
+    if (hostLocked) return false
     if (value && !isLoading && runState.mode === 'NotRunning') {
       showNotice.error('settings.feedback.errors.sysproxy.coreNotReady')
       return false
@@ -158,6 +160,7 @@ const ProxyControlSwitches = ({
   }
 
   const handleTunToggle = async (value: boolean) => {
+    if (tunLocked) return false
     if (value && !isTunModeAvailable) {
       requestService({
         reason: 'tunNeedsService',
@@ -170,6 +173,7 @@ const ProxyControlSwitches = ({
   }
 
   const onUninstallService = useLockFn(async () => {
+    if (serviceLocked) return
     try {
       await uninstallServiceAndStartSidecar()
     } catch (err) {
@@ -200,7 +204,7 @@ const ProxyControlSwitches = ({
         <SwitchRow
           label={t('settings.sections.proxyControl.fields.tunMode')}
           active={(enable_tun_mode && isTunModeAvailable) || false}
-          disabled={hostLocked}
+          disabled={tunLocked}
           infoTitle={t('settings.sections.proxyControl.tooltips.tunMode')}
           onInfoClick={() => tunRef.current?.open()}
           onToggle={handleTunToggle}
@@ -217,7 +221,7 @@ const ProxyControlSwitches = ({
                   sx={{ color: 'warning.main', ml: 1 }}
                 />
               )}
-              {isServiceInstallReady && (
+              {isServiceInstallReady && !serviceLocked && (
                 <TooltipIcon
                   title={t(
                     'settings.sections.proxyControl.actions.uninstallService',
@@ -233,21 +237,23 @@ const ProxyControlSwitches = ({
         />
       )}
 
-      {hostLocked && (
+      {(hostLocked || (isTunMode && tunLocked)) && (
         <Typography
           variant="caption"
           color="text.secondary"
           sx={{ display: 'block', px: 1 }}
         >
-          {flavor
-            ? t('settings.sections.proxyControl.tooltips.hostChangesDisabled')
-            : unavailable
-              ? t(
-                  'settings.sections.proxyControl.tooltips.capabilitiesUnavailable',
-                )
-              : t(
-                  'settings.sections.proxyControl.tooltips.capabilitiesLoading',
-                )}
+          {flavor === 'network-control'
+            ? t('settings.sections.proxyControl.tooltips.userBuildRestrictions')
+            : flavor
+              ? t('settings.sections.proxyControl.tooltips.hostChangesDisabled')
+              : unavailable
+                ? t(
+                    'settings.sections.proxyControl.tooltips.capabilitiesUnavailable',
+                  )
+                : t(
+                    'settings.sections.proxyControl.tooltips.capabilitiesLoading',
+                  )}
         </Typography>
       )}
       <SysproxyViewer ref={sysproxyRef} />

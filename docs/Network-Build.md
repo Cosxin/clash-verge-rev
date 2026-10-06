@@ -1,6 +1,18 @@
-# Isolated developer builds
+# NetworkControl builds
 
 Tracked issue: [network-control foundation #1](https://github.com/Cosxin/clash-verge-rev/issues/1).
+
+## User app
+
+`node scripts/network-build.mjs aarch64-apple-darwin --user --bundle --cache /absolute/workspace/asset-cache` builds **NetworkControl** in the release profile. It uses its own data directory and direct core, without adopting an installed Clash Verge service. Opening the app does not enable the system proxy; import a Mihomo YAML profile, then use **Connect** on Home. The isolated developer flavor remains available without `--user`.
+
+This build supports explicit system-proxy activation only. TUN, service installation, launch-at-login and native firewall changes are unavailable. Apps that ignore the operating system proxy are not covered. Connection status reports observed proxy/core state, not verified internet access.
+
+Disconnect and Quit clear only a proxy acquired by this app during its current session, after checking that another application has not replaced it. They do not restore an earlier proxy/PAC configuration, and hard-crash recovery is unfinished. Close competing proxy clients before connecting, or reopen them afterward to restore their settings. The app warns before Connect; do not treat this build as a VPN kill switch.
+
+The local macOS bundle is ad-hoc signed, not Developer ID signed or notarized. If macOS blocks it, use System Settings → Privacy & Security → Open Anyway. Building and inspecting it do not launch the app or establish a working remote connection. Windows/Linux runtime and installer qualification remain separate.
+
+## Isolated developer app
 
 These commands build **NetworkControl Dev**, not an upstream production installation. They never launch the app, install a service, register a driver, or change OS networking. The `network-dev` Rust feature is mandatory: it separates application data and IPC, uses direct sidecar mode, and rejects the unavailable alpha core. The Tauri override has identifier `io.github.cosxin.network-control.dev`, an explicit developer product name, no updater endpoints, no updater artifacts, and no deep-link registrations. Use the wrapper, not the upstream `pnpm build`/`pnpm prebuild` commands, for this flavor.
 

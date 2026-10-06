@@ -773,6 +773,9 @@ impl CoreManager {
     }
 
     async fn prepare_startup(&self) -> StartupDecision {
+        if cfg!(feature = "network-control") {
+            return StartupDecision::Sidecar;
+        }
         #[cfg(target_os = "windows")]
         self.wait_for_service_if_needed().await;
 
@@ -818,6 +821,9 @@ impl CoreManager {
 
     #[cfg(target_os = "windows")]
     async fn spawn_service_handoff_watcher(&self) {
+        if cfg!(feature = "network-control") {
+            return;
+        }
         use crate::constants::timing;
         use crate::process::AsyncHandler;
         use std::sync::atomic::Ordering;
@@ -881,6 +887,9 @@ impl CoreManager {
     #[cfg(target_os = "windows")]
     #[tracing::instrument(skip_all, level = "debug", fields(outcome = tracing::field::Empty))]
     async fn try_handoff_sidecar_to_service(&self) -> HandoffOutcome {
+        if cfg!(feature = "network-control") {
+            return HandoffOutcome::Done;
+        }
         // Before probing: a probe reply records an observation, which clears sidecar_allowed.
         if crate::core::runstate::RUN_STATE.state().sidecar_allowed {
             return HandoffOutcome::Done;

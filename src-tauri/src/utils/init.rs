@@ -546,7 +546,7 @@ pub async fn init_resources() -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(target_os = "windows", not(feature = "network-dev")))]
+#[cfg(all(target_os = "windows", not(feature = "network-control")))]
 pub fn init_scheme() -> Result<()> {
     use tauri::utils::platform::current_exe;
     use winreg::{RegKey, enums::HKEY_CURRENT_USER};
@@ -566,7 +566,7 @@ pub fn init_scheme() -> Result<()> {
 
     Ok(())
 }
-#[cfg(all(target_os = "linux", not(feature = "network-dev")))]
+#[cfg(all(target_os = "linux", not(feature = "network-control")))]
 pub fn init_scheme() -> Result<()> {
     const DESKTOP_FILE: &str = "clash-verge.desktop";
 
@@ -588,12 +588,12 @@ pub fn init_scheme() -> Result<()> {
     crate::utils::linux::mime::ensure_mimeapps_entries(DESKTOP_FILE, DEEP_LINK_SCHEMES)?;
     Ok(())
 }
-#[cfg(any(target_os = "macos", feature = "network-dev"))]
+#[cfg(any(target_os = "macos", feature = "network-control"))]
 pub const fn init_scheme() -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(target_os = "linux", not(feature = "network-dev")))]
+#[cfg(all(target_os = "linux", not(feature = "network-control")))]
 const DEEP_LINK_SCHEMES: &[&str] = &["clash", "clash-verge"];
 
 pub async fn startup_script() -> Result<()> {

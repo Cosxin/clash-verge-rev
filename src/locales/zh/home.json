@@ -27,6 +27,35 @@
     "title": "首页"
   },
   "components": {
+    "connect": {
+      "title": "连接",
+      "status": {
+        "enabled": "系统代理已启用",
+        "direct": "系统代理已启用 · 直连模式（不使用 VPN）",
+        "coreUnavailable": "系统代理已启用 · 内核不可用",
+        "unknown": "无法确认系统代理状态",
+        "disconnected": "系统代理未连接"
+      },
+      "fields": { "profile": "所选配置：{{name}}" },
+      "actions": {
+        "addServers": "添加服务器",
+        "chooseServer": "选择服务器",
+        "connect": "连接",
+        "disconnect": "断开连接"
+      },
+      "hints": {
+        "noProfile": "请先导入并激活配置，再选择服务器。",
+        "coreUnavailable": "连接前需要本地内核就绪。如持续不可用，请检查网络设置。",
+        "scope": "连接会为遵循操作系统代理设置的应用启用系统代理；实际路由取决于配置及模式，尚未验证服务器可达性。断开会关闭系统代理，不会恢复使用本应用前的代理设置。",
+        "tun": "TUN 是独立请求，此处不代表它已生效。断开也会关闭 TUN 请求。",
+        "tunUnavailable": "存在已保存的 TUN 偏好，但此版本无法启用 TUN。连接及断开仅控制系统代理。"
+      },
+      "errors": { "change": "无法完成或确认请求。重试前请检查网络设置。" },
+      "confirm": {
+        "title": "启用系统代理？",
+        "description": "此操作会替换当前系统代理或 PAC 设置。断开、退出或崩溃后，不会自动恢复之前的设置。如需使用其他代理，请确认可以手动恢复后再继续。"
+      }
+    },
     "proxyTun": {
       "status": {
         "systemProxyEnabled": "系统代理已启用，您的应用将通过代理访问网络",

@@ -39,7 +39,12 @@ pub(super) async fn resolve_scheme(param: &str) -> Result<()> {
 }
 
 fn extract_subscription_info(link_parsed: &Url) -> Option<(std::string::String, Option<String>)> {
-    if !matches!(link_parsed.scheme(), "clash" | "clash-verge") {
+    let allowed = if cfg!(all(feature = "network-control", not(feature = "network-dev"))) {
+        link_parsed.scheme() == "networkcontrol"
+    } else {
+        matches!(link_parsed.scheme(), "clash" | "clash-verge")
+    };
+    if !allowed {
         return None;
     }
 
@@ -135,6 +140,23 @@ async fn post_import_updates(uid: &String, had_current_profile: bool) {
 
     if should_update_core {
         refresh_core_config().await;
+    }
+}
+
+#[cfg(all(test, feature = "network-control", not(feature = "network-dev")))]
+mod tests {
+    #[test]
+    fn user_deep_links_do_not_adopt_an_upstream_scheme() -> anyhow::Result<()> {
+        let own =
+            tauri::Url::parse("networkcontrol://install-config?url=https%3A%2F%2Fexample.invalid%2Fsubscription")?;
+        assert!(super::extract_subscription_info(&own).is_some());
+        for scheme in ["clash", "clash-verge"] {
+            let upstream = tauri::Url::parse(&format!(
+                "{scheme}://install-config?url=https%3A%2F%2Fexample.invalid%2Fsubscription"
+            ))?;
+            assert!(super::extract_subscription_info(&upstream).is_none());
+        }
+        Ok(())
     }
 }
 

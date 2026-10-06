@@ -11,7 +11,7 @@ use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_clash_verge_sysinfo::is_current_app_handle_admin;
 
 pub async fn update_launch() -> Result<()> {
-    if cfg!(feature = "network-dev") {
+    if cfg!(feature = "network-control") {
         return Ok(());
     }
     let enable_auto_launch = { Config::verge().await.latest_arc().enable_auto_launch };

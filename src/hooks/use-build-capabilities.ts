@@ -10,7 +10,10 @@ export const useBuildCapabilities = () => {
 
   return {
     flavor: data?.flavor,
-    hostLocked: data?.hostNetworkChanges !== true,
+    hostLocked: data?.hostNetworkChanges !== true || data.systemProxy !== true,
+    tunLocked: data?.tun !== true,
+    serviceLocked: data?.service !== true,
+    autostartLocked: data?.autostart !== true,
     unavailable: data === undefined && Boolean(error),
   }
 }

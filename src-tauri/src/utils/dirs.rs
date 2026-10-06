@@ -257,7 +257,13 @@ fn sidecar_ipc_path_for(_app_root: &std::path::Path, identity: &clash_verge_serv
 
 #[cfg(any(windows, test))]
 fn sidecar_pipe_name(identity: &clash_verge_service_ipc::OwnerIdentity, is_dev: bool) -> String {
-    let flavor = if is_dev { "dev" } else { "release" };
+    let flavor = if cfg!(all(feature = "network-control", not(feature = "network-dev"))) {
+        "release"
+    } else if is_dev {
+        "dev"
+    } else {
+        "release"
+    };
     let product = if cfg!(feature = "network-control") {
         "network-control"
     } else {
@@ -340,7 +346,13 @@ mod ipc_tests {
                 } else {
                     "verge-mihomo"
                 },
-                if cfg!(feature = "verge-dev") { "dev" } else { "release" },
+                if cfg!(all(feature = "network-control", not(feature = "network-dev"))) {
+                    "release"
+                } else if cfg!(feature = "verge-dev") {
+                    "dev"
+                } else {
+                    "release"
+                },
                 clash_verge_service_ipc::owner_key(&identity)
             ))
         );
@@ -369,7 +381,7 @@ mod windows_pipe_name_tests {
     use clash_verge_service_ipc::OwnerIdentity;
 
     #[test]
-    fn windows_sidecar_pipe_separates_dev_and_release_for_the_same_owner() {
+    fn windows_sidecar_pipe_uses_the_product_flavor_and_owner() {
         let identity = OwnerIdentity::Windows {
             sid: "S-1-5-21-1000".to_owned(),
         };
@@ -386,7 +398,14 @@ mod windows_pipe_name_tests {
         );
         assert_eq!(
             sidecar_pipe_name(&identity, true),
-            format!(r"\\.\pipe\{product}-sidecar-dev-{owner_key}")
+            format!(
+                r"\\.\pipe\{product}-sidecar-{}-{owner_key}",
+                if cfg!(all(feature = "network-control", not(feature = "network-dev"))) {
+                    "release"
+                } else {
+                    "dev"
+                }
+            )
         );
     }
 
@@ -410,7 +429,15 @@ mod windows_pipe_name_tests {
     fn network_control_identity_matches_the_user_bundle() -> anyhow::Result<()> {
         let config: serde_json::Value = serde_json::from_str(include_str!("../../tauri.network.conf.json"))?;
         assert_eq!(config["identifier"], super::APP_ID);
+        assert_ne!(super::APP_ID, "io.github.cosxin.network-control.dev");
+        assert_ne!(super::APP_ID, "io.github.clash-verge-rev.clash-verge-rev");
+        assert_eq!(super::BACKUP_DIR, "network-control-backup");
         assert_eq!(crate::config::IVerge::VALID_CLASH_CORES, &["verge-mihomo"]);
+        assert_eq!(config["plugins"]["updater"]["endpoints"], serde_json::json!([]));
+        assert_eq!(
+            config["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!(["networkcontrol"])
+        );
         Ok(())
     }
 }

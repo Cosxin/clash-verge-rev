@@ -5,11 +5,12 @@
   "identifier": "io.github.cosxin.network-control",
   "bundle": {
     "publisher": "Cosxin",
-    "longDescription": "Connect through your proxy servers, route individual apps and review connection history with the Mihomo core. Native firewall adapters require a separately qualified installation.",
+    "longDescription": "Connect apps using the system proxy through your proxy servers, route individual apps and review connection history with the Mihomo core. Whole-device TUN and native firewall management require separately qualified helpers and remain unavailable in this build.",
     "shortDescription": "NetworkControl",
     "externalBin": ["sidecar/verge-mihomo"],
-    "resources": ["resources"],
+    "resources": ["resources/network-assets-*.json", "../LICENSE"],
     "createUpdaterArtifacts": false,
+    "category": "Utility",
     "macOS": {
       "signingIdentity": null,
       "infoPlist": null,
@@ -23,7 +24,7 @@
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["clash"]
+        "schemes": ["networkcontrol"]
       }
     }
   }

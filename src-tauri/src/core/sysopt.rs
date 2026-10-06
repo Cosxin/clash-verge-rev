@@ -19,6 +19,124 @@ use std::{
 use sysproxy::{Autoproxy, GuardMonitor, GuardType, Sysproxy};
 use tokio::sync::Mutex as TokioMutex;
 
+#[derive(Clone)]
+struct UserProxyLease {
+    service: std::string::String,
+    system: Sysproxy,
+    auto: Autoproxy,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum UserProxyAction {
+    LeaveUntouched,
+    Apply,
+    Clear,
+}
+
+const fn user_proxy_action(explicit: bool, owned: bool, enabled: bool) -> UserProxyAction {
+    if enabled && (explicit || owned) {
+        UserProxyAction::Apply
+    } else if !enabled && owned {
+        UserProxyAction::Clear
+    } else {
+        UserProxyAction::LeaveUntouched
+    }
+}
+
+fn user_proxy_matches(lease: &UserProxyLease, service: &str, snapshot: &sysproxy::ProxySnapshot) -> bool {
+    lease.service == service && target_is_already_in_place(snapshot, &lease.system, &lease.auto)
+}
+
+#[cfg(target_os = "macos")]
+fn user_proxy_service() -> Result<std::string::String> {
+    use std::ffi::{c_char, c_void};
+    type Ref = *const c_void;
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFRelease(value: Ref);
+        fn CFGetTypeID(value: Ref) -> usize;
+        fn CFDictionaryGetTypeID() -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFStringCreateWithCString(allocator: Ref, text: *const c_char, encoding: u32) -> Ref;
+        fn CFStringGetCString(value: Ref, buffer: *mut c_char, size: isize, encoding: u32) -> u8;
+        fn CFDictionaryGetValue(dictionary: Ref, key: Ref) -> Ref;
+    }
+    #[link(name = "SystemConfiguration", kind = "framework")]
+    unsafe extern "C" {
+        fn SCDynamicStoreCreate(allocator: Ref, name: Ref, callback: Ref, context: Ref) -> Ref;
+        fn SCDynamicStoreCopyValue(store: Ref, key: Ref) -> Ref;
+    }
+    let name =
+        unsafe { CFStringCreateWithCString(std::ptr::null(), c"NetworkControl proxy lease".as_ptr(), 0x0800_0100) };
+    anyhow::ensure!(!name.is_null(), "Network service identity is unavailable");
+    defer! { unsafe { CFRelease(name); } }
+    let store = unsafe { SCDynamicStoreCreate(std::ptr::null(), name, std::ptr::null(), std::ptr::null()) };
+    anyhow::ensure!(!store.is_null(), "Network service identity is unavailable");
+    defer! { unsafe { CFRelease(store); } }
+    let key =
+        unsafe { CFStringCreateWithCString(std::ptr::null(), c"State:/Network/Global/IPv4".as_ptr(), 0x0800_0100) };
+    anyhow::ensure!(!key.is_null(), "Network service identity is unavailable");
+    defer! { unsafe { CFRelease(key); } }
+    let dictionary = unsafe { SCDynamicStoreCopyValue(store, key) };
+    anyhow::ensure!(!dictionary.is_null(), "No active network service");
+    defer! { unsafe { CFRelease(dictionary); } }
+    anyhow::ensure!(
+        unsafe { CFGetTypeID(dictionary) == CFDictionaryGetTypeID() },
+        "Invalid network service identity"
+    );
+    let key = unsafe { CFStringCreateWithCString(std::ptr::null(), c"PrimaryService".as_ptr(), 0x0800_0100) };
+    anyhow::ensure!(!key.is_null(), "Network service identity is unavailable");
+    defer! { unsafe { CFRelease(key); } }
+    let service = unsafe { CFDictionaryGetValue(dictionary, key) };
+    anyhow::ensure!(
+        !service.is_null() && unsafe { CFGetTypeID(service) == CFStringGetTypeID() },
+        "No active network service"
+    );
+    let mut buffer = [0_i8; 256];
+    anyhow::ensure!(
+        unsafe { CFStringGetCString(service, buffer.as_mut_ptr(), buffer.len() as isize, 0x0800_0100) } != 0,
+        "Invalid network service identity"
+    );
+    Ok(unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) }
+        .to_str()?
+        .to_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn user_proxy_service() -> Result<std::string::String> {
+    Ok(std::env::consts::OS.to_owned())
+}
+
+fn read_user_proxy() -> Result<(std::string::String, sysproxy::ProxySnapshot)> {
+    let service = user_proxy_service()?;
+    #[cfg(target_os = "macos")]
+    let snapshot = Sysproxy::snapshot()?;
+    #[cfg(not(target_os = "macos"))]
+    let snapshot = {
+        let system = Sysproxy::get_system_proxy()?;
+        let auto = Autoproxy::get_auto_proxy()?;
+        let endpoint = || sysproxy::ProxyEndpoint {
+            host: system.host.clone(),
+            port: system.port,
+            enable: system.enable,
+            switched_on: system.enable,
+        };
+        sysproxy::ProxySnapshot {
+            socks: endpoint(),
+            http: endpoint(),
+            https: endpoint(),
+            auto_switched_on: auto.enable,
+            auto,
+            bypass: system.bypass,
+        }
+    };
+    anyhow::ensure!(
+        service == user_proxy_service()?,
+        "Network service changed while reading proxy settings"
+    );
+    Ok((service, snapshot))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProxyApplyStep {
     Sysproxy,
@@ -80,7 +198,6 @@ enum OsProxyState {
     DifferentOrUnknown,
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn target_is_already_in_place(snapshot: &sysproxy::ProxySnapshot, sys: &Sysproxy, auto: &Autoproxy) -> bool {
     if auto.enable {
         // PAC writes bypass state too.
@@ -247,6 +364,7 @@ pub(crate) struct Sysopt {
     reset_sysproxy: AtomicBool,
     inner_proxy: Arc<RwLock<(Sysproxy, Autoproxy)>>,
     guard: Arc<RwLock<GuardMonitor>>,
+    user_proxy_lease: RwLock<Option<UserProxyLease>>,
 }
 
 impl Default for Sysopt {
@@ -257,6 +375,7 @@ impl Default for Sysopt {
             reset_sysproxy: AtomicBool::new(false),
             inner_proxy: Arc::new(RwLock::new((Sysproxy::default(), Autoproxy::default()))),
             guard: Arc::new(RwLock::new(GuardMonitor::new(GuardType::None, Duration::from_secs(30)))),
+            user_proxy_lease: RwLock::new(None),
         }
     }
 }
@@ -327,6 +446,9 @@ impl Sysopt {
     pub(super) async fn refresh_guard(&self) -> bool {
         if cfg!(feature = "network-dev") {
             return true;
+        }
+        if cfg!(feature = "network-control") {
+            return self.stop_proxy_guard().await;
         }
         logging!(info, Type::Core, "Refreshing system proxy guard...");
         let verge = Config::verge().await.latest_arc();
@@ -416,10 +538,47 @@ impl Sysopt {
         let _ = self.update_lock.lock().await;
     }
 
+    pub(crate) fn owns_user_proxy(&self) -> bool {
+        self.user_proxy_lease.read().is_some()
+    }
+
+    async fn verify_user_proxy_lease(&self) -> Result<bool> {
+        let lease = self.user_proxy_lease.read().clone();
+        let Some(lease) = lease else {
+            return Ok(false);
+        };
+        tokio::task::spawn_blocking(move || {
+            let (service, snapshot) = read_user_proxy()?;
+            Ok(user_proxy_matches(&lease, &service, &snapshot))
+        })
+        .await?
+    }
+
     /// init the sysproxy
     pub(super) async fn update_sysproxy(&self) -> Result<()> {
         proxy_control::ensure_host_proxy_mutation_allowed()?;
+        if cfg!(feature = "network-control") {
+            let enabled = Config::verge().await.latest_arc().enable_system_proxy.unwrap_or(false);
+            match user_proxy_action(
+                proxy_control::is_explicit_proxy_request(),
+                self.owns_user_proxy(),
+                enabled,
+            ) {
+                UserProxyAction::LeaveUntouched => return Ok(()),
+                UserProxyAction::Clear => return self.reset_sysproxy().await,
+                UserProxyAction::Apply => {}
+            }
+        }
         let _lock = self.update_lock.lock().await;
+        if cfg!(feature = "network-control") && self.owns_user_proxy() && !self.verify_user_proxy_lease().await? {
+            *self.user_proxy_lease.write() = None;
+            anyhow::bail!("Proxy settings changed outside NetworkControl; they were left untouched");
+        }
+        let user_service = if cfg!(feature = "network-control") {
+            Some(tokio::task::spawn_blocking(user_proxy_service).await??)
+        } else {
+            None
+        };
         let verge = Config::verge().await.latest_arc();
         // Configured, not live: this runs while the Core is being started or restarted, and
         // asking a Core that is not up yet would only fall back here anyway.
@@ -432,7 +591,7 @@ impl Sysopt {
             verge.enable_system_proxy.unwrap_or_default(),
             verge.proxy_auto_config.unwrap_or_default(),
             verge.proxy_host.as_deref().unwrap_or("127.0.0.1"),
-            verge.enable_proxy_guard.unwrap_or_default(),
+            verge.enable_proxy_guard.unwrap_or_default() && !cfg!(feature = "network-control"),
         );
 
         let (sys, auto, guard_type) = {
@@ -482,6 +641,23 @@ impl Sysopt {
             && current_os_proxy_state(sys.clone(), auto.clone()).await == OsProxyState::AlreadyApplied
         {
             self.access_guard().write().set_guard_type(guard_type);
+            if let Some(service) = user_service {
+                let lease = UserProxyLease {
+                    service,
+                    system: sys,
+                    auto,
+                };
+                let check = lease.clone();
+                anyhow::ensure!(
+                    tokio::task::spawn_blocking(move || {
+                        let (service, snapshot) = read_user_proxy()?;
+                        Ok::<_, anyhow::Error>(user_proxy_matches(&check, &service, &snapshot))
+                    })
+                    .await??,
+                    "Network service changed before proxy ownership was acquired"
+                );
+                *self.user_proxy_lease.write() = Some(lease);
+            }
             return Ok(());
         }
 
@@ -496,6 +672,12 @@ impl Sysopt {
         };
 
         // Only a step that actually wrote is evidence the OS changed; a skipped one is not.
+        let user_target = user_service.map(|service| UserProxyLease {
+            service,
+            system: sys.clone(),
+            auto: auto.clone(),
+        });
+        let verify_target = user_target.clone();
         let applied = tokio::task::spawn_blocking(move || {
             let mut earlier_step_reached_os = false;
             for step in apply_steps {
@@ -508,6 +690,15 @@ impl Sysopt {
                     Err(error) => return Err((earlier_step_reached_os, error)),
                 }
             }
+            if let Some(lease) = verify_target {
+                let (service, snapshot) = read_user_proxy().map_err(|error| (earlier_step_reached_os, error))?;
+                if !user_proxy_matches(&lease, &service, &snapshot) {
+                    return Err((
+                        earlier_step_reached_os,
+                        anyhow::anyhow!("System proxy readback did not match the requested settings"),
+                    ));
+                }
+            }
             Ok(())
         })
         .await;
@@ -515,12 +706,19 @@ impl Sysopt {
         match applied {
             Ok(Ok(())) => {}
             Ok(Err((earlier_step_completed, error))) => {
+                if cfg!(feature = "network-control") {
+                    return Err(error
+                        .context("System proxy change was not confirmed; existing settings were not blindly cleared"));
+                }
                 return Err(self
                     .recover_from_failed_write(error, earlier_step_completed, guard_was_running, compensation)
                     .await);
             }
             Err(join_error) => {
                 let error = anyhow::Error::from(join_error).context("the system proxy write task did not finish");
+                if cfg!(feature = "network-control") {
+                    return Err(error);
+                }
                 return Err(self
                     .recover_from_failed_write(error, false, guard_was_running, compensation)
                     .await);
@@ -529,12 +727,18 @@ impl Sysopt {
 
         // Never point the guard at a target that failed to reach the OS.
         self.access_guard().write().set_guard_type(guard_type);
+        if let Some(lease) = user_target {
+            *self.user_proxy_lease.write() = Some(lease);
+        }
         Ok(())
     }
 
     /// reset the sysproxy
     pub(super) async fn reset_sysproxy(&self) -> Result<()> {
         if cfg!(feature = "network-dev") {
+            return Ok(());
+        }
+        if cfg!(feature = "network-control") && !self.owns_user_proxy() {
             return Ok(());
         }
         if self
@@ -550,6 +754,11 @@ impl Sysopt {
         let _lock = self.update_lock.lock().await;
         let _guard_operation = self.guard_operation_lock.lock().await;
         let drained = self.stop_proxy_guard_locked().await;
+
+        if cfg!(feature = "network-control") && !self.verify_user_proxy_lease().await? {
+            *self.user_proxy_lease.write() = None;
+            return Ok(());
+        }
 
         // 直接关闭所有代理
         let (sys, auto) = {
@@ -572,7 +781,18 @@ impl Sysopt {
             || disable_all_proxies(sys.clone(), auto.clone()),
             || self.stop_proxy_guard_locked(),
         )
-        .await
+        .await?;
+        if cfg!(feature = "network-control") {
+            anyhow::ensure!(
+                tokio::task::spawn_blocking(move || {
+                    read_user_proxy().map(|(_, snapshot)| snapshot.is_all_disabled())
+                })
+                .await??,
+                "System proxy cleanup could not be confirmed"
+            );
+            *self.user_proxy_lease.write() = None;
+        }
+        Ok(())
     }
 }
 
@@ -587,6 +807,49 @@ mod tests {
     use parking_lot::Mutex;
     use std::collections::VecDeque;
     use sysproxy::{Autoproxy, Sysproxy};
+
+    #[test]
+    fn user_proxy_changes_require_explicit_intent_or_existing_ownership() {
+        use super::{UserProxyAction, user_proxy_action};
+        assert_eq!(user_proxy_action(false, false, false), UserProxyAction::LeaveUntouched);
+        assert_eq!(user_proxy_action(false, false, true), UserProxyAction::LeaveUntouched);
+        assert_eq!(user_proxy_action(true, false, false), UserProxyAction::LeaveUntouched);
+        assert_eq!(user_proxy_action(true, false, true), UserProxyAction::Apply);
+        assert_eq!(user_proxy_action(false, true, true), UserProxyAction::Apply);
+        assert_eq!(user_proxy_action(false, true, false), UserProxyAction::Clear);
+    }
+
+    #[test]
+    fn user_proxy_lease_does_not_match_a_foreign_writer_or_service() {
+        let lease = super::UserProxyLease {
+            service: "service-a".to_owned(),
+            system: Sysproxy {
+                host: "127.0.0.1".to_owned(),
+                port: 7900,
+                enable: true,
+                bypass: "localhost".to_owned(),
+            },
+            auto: Autoproxy::default(),
+        };
+        assert!(super::user_proxy_matches(&lease, "service-a", &holding_global(7900)));
+        assert!(!super::user_proxy_matches(&lease, "service-b", &holding_global(7900)));
+        assert!(!super::user_proxy_matches(&lease, "service-a", &holding_global(9000)));
+        assert!(!super::user_proxy_matches(&lease, "service-a", &holding_nothing()));
+        let mut changed = holding_global(7900);
+        changed.auto_switched_on = true;
+        assert!(!super::user_proxy_matches(&lease, "service-a", &changed));
+    }
+
+    #[cfg(feature = "network-control")]
+    #[tokio::test]
+    async fn user_proxy_cleanup_without_a_lease_never_reads_or_writes_the_os() -> anyhow::Result<()> {
+        let sysopt = super::Sysopt::default();
+        assert!(!sysopt.owns_user_proxy());
+        sysopt.reset_sysproxy().await?;
+        assert!(!sysopt.owns_user_proxy());
+        crate::core::autostart::update_launch().await?;
+        Ok(())
+    }
 
     #[cfg(target_os = "macos")]
     use super::skip_without_network_service;

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -118,6 +119,47 @@ if (bundle) {
     'bundle',
   )
   const app = path.join(output, 'macos', `${config.productName}.app`)
+  if (userFlavor) {
+    const core = path.join(app, 'Contents/MacOS/verge-mihomo')
+    const expectedCore = assetManifest.staged.find(
+      (entry) => entry.path === `src-tauri/sidecar/verge-mihomo-${target}`,
+    )?.sha256
+    const hashCore = async () =>
+      createHash('sha256')
+        .update(await fs.readFile(core))
+        .digest('hex')
+    if (!expectedCore || (await hashCore()) !== expectedCore)
+      throw new Error(
+        'The bundled core does not match its pinned staging manifest.',
+      )
+    execFileSync('codesign', ['--verify', '--strict', '--verbose=2', core], {
+      stdio: 'inherit',
+    })
+    // Seal only the container/main executable; never rewrite the pinned nested core.
+    execFileSync(
+      'codesign',
+      [
+        '--force',
+        '--sign',
+        '-',
+        '--timestamp=none',
+        '--identifier',
+        config.identifier,
+        app,
+      ],
+      { stdio: 'inherit' },
+    )
+    if ((await hashCore()) !== expectedCore)
+      throw new Error(
+        'Ad-hoc bundle signing changed the pinned core; refusing to package.',
+      )
+    execFileSync('codesign', ['--verify', '--strict', '--verbose=2', app], {
+      stdio: 'inherit',
+    })
+    console.log(
+      'Locally ad-hoc signed user bundle; pinned core unchanged. No Developer ID signature or notarization.',
+    )
+  }
   const dmgDirectory = path.join(output, 'dmg')
   await fs.mkdir(dmgDirectory, { recursive: true })
   const image = path.join(
@@ -160,7 +202,9 @@ if (bundle) {
       image,
       1 /* COPYFILE_EXCL: preserve an existing artifact */,
     )
-    console.log(`Created unmounted, unsigned developer disk image: ${image}`)
+    console.log(
+      `Created unmounted ${userFlavor ? 'NetworkControl user disk image with a locally ad-hoc signed app' : 'unsigned developer disk image'}: ${image}`,
+    )
   } finally {
     // Only our validated mkdtemp-created artifact staging directory is removed.
     await fs.rm(temporary, { recursive: true, force: true })
@@ -168,6 +212,6 @@ if (bundle) {
 }
 console.log(
   userFlavor
-    ? 'NetworkControl build complete. Unsigned and not notarized: macOS asks for confirmation on first launch. Native privileged adapters remain unavailable.'
+    ? 'Unlaunched NetworkControl user build complete. No Developer ID signature or notarization. Connection behavior was not tested; TUN and native privileged adapters remain unavailable.'
     : 'Unlaunched developer build complete. No Developer ID signature/notarization; not qualified for distribution. Native privileged adapters remain unavailable.',
 )
