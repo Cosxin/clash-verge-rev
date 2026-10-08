@@ -14,6 +14,7 @@ import { useSystemProxyState } from '@/hooks/use-system-proxy-state'
 import { useSystemState } from '@/hooks/use-system-state'
 import { useVerge } from '@/hooks/use-verge'
 import { useVisibility } from '@/hooks/use-visibility'
+import { navigationItems } from '@/pages/_navigation-meta'
 import {
   getAutotemProxy,
   getBuildCapabilities,
@@ -149,10 +150,16 @@ export const ConnectCard = () => {
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>
-            <Button disabled={pending} onClick={() => navigate('/profiles')}>
+            <Button
+              disabled={pending}
+              onClick={() => navigate(navigationItems.profiles.path)}
+            >
               {t('home.components.connect.actions.addServers')}
             </Button>
-            <Button disabled={pending} onClick={() => navigate('/proxies')}>
+            <Button
+              disabled={pending}
+              onClick={() => navigate(navigationItems.proxies.path)}
+            >
               {t('home.components.connect.actions.chooseServer')}
             </Button>
             <Button

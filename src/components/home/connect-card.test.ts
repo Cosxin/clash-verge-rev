@@ -1,5 +1,12 @@
 import { isValidElement, useState, type ReactNode } from 'react'
+import { createMemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
+
+import { navigationItems } from '@/pages/_navigation-meta'
+import { router } from '@/pages/_routers'
+import HomePage from '@/pages/home'
+import ProfilePage from '@/pages/profiles'
+import ProxyPage from '@/pages/proxies'
 
 import { ConnectCard } from './connect-card'
 
@@ -13,6 +20,7 @@ const fixture = vi.hoisted(() => ({
   selectedUid: 'local-fixture',
   toggle: vi.fn(),
   patchVerge: vi.fn(),
+  navigate: undefined as undefined | ((path: string) => Promise<void>),
 }))
 
 vi.mock('react', async (original) => ({
@@ -22,7 +30,26 @@ vi.mock('react', async (original) => ({
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
-vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }))
+vi.mock('react-router', async (original) => {
+  const actual = await original<typeof import('react-router')>()
+  return {
+    ...actual,
+    createBrowserRouter: (
+      routes: Parameters<typeof actual.createMemoryRouter>[0],
+    ) => actual.createMemoryRouter(routes),
+    useNavigate: () => fixture.navigate,
+  }
+})
+vi.mock('@/pages/_layout', () => ({ default: () => null }))
+vi.mock('@/pages/connections', () => ({ default: () => null }))
+vi.mock('@/pages/home', () => ({ default: () => null }))
+vi.mock('@/pages/logs', () => ({ default: () => null }))
+vi.mock('@/pages/network', () => ({ default: () => null }))
+vi.mock('@/pages/profiles', () => ({ default: () => null }))
+vi.mock('@/pages/proxies', () => ({ default: () => null }))
+vi.mock('@/pages/rules', () => ({ default: () => null }))
+vi.mock('@/pages/settings', () => ({ default: () => null }))
+vi.mock('@/pages/unlock', () => ({ default: () => null }))
 vi.mock('ahooks', () => ({ useLockFn: (fn: unknown) => fn }))
 vi.mock('@mui/icons-material', () => ({ PowerSettingsNewRounded: 'icon' }))
 vi.mock('@mui/material', () => ({
@@ -99,6 +126,7 @@ const elements = (
 
 beforeEach(() => {
   vi.clearAllMocks()
+  fixture.navigate = (path) => router.navigate(path)
   Object.assign(fixture, {
     hostLocked: false,
     indicator: false,
@@ -111,6 +139,64 @@ beforeEach(() => {
 })
 
 describe('observed Home connection status', () => {
+  test.each([
+    {
+      label: 'addServers',
+      path: navigationItems.profiles.path,
+      Component: ProfilePage,
+    },
+    {
+      label: 'chooseServer',
+      path: navigationItems.proxies.path,
+      Component: ProxyPage,
+    },
+  ])(
+    'routes $label to its registered page without a 404',
+    async ({ label, path, Component }) => {
+      const button = elements(ConnectCard()).find(
+        (node) =>
+          node.type === 'button' &&
+          node.props.children === `home.components.connect.actions.${label}`,
+      )
+      expect(button).toBeDefined()
+      await button?.props.onClick()
+      expect(router.state.location.pathname).toBe(path)
+      expect(router.state.errors).toBeNull()
+      expect(router.state.matches.at(-1)?.route.element).toMatchObject({
+        type: Component,
+      })
+    },
+  )
+
+  test.each(['/profiles', '/proxy', '/unregistered-start-page'])(
+    'recovers invalid saved route %s inside the layout',
+    async (path) => {
+      await router.navigate(path)
+      expect(router.state.location.pathname).toBe(navigationItems.home.path)
+      expect(router.state.errors).toBeNull()
+      expect(router.state.matches.at(-1)?.route.element).toMatchObject({
+        type: HomePage,
+      })
+      expect(router.state.matches[0].route.path).toBe('/')
+      expect(router.state.historyAction).toBe('REPLACE')
+    },
+  )
+
+  test('recovers a bad route on startup before the layout mounts', async () => {
+    const restored = createMemoryRouter(router.routes, {
+      initialEntries: ['/profiles'],
+    })
+    try {
+      await vi.waitFor(() => expect(restored.state.initialized).toBe(true))
+      expect(restored.state.location.pathname).toBe(navigationItems.home.path)
+      expect(restored.state.errors).toBeNull()
+      expect(restored.state.matches.at(-1)?.route.element).toMatchObject({
+        type: HomePage,
+      })
+    } finally {
+      restored.dispose()
+    }
+  })
   test('does not let an unsupported stale TUN request block proxy cleanup', async () => {
     fixture.tunRequested = true
     fixture.tunAllowed = false
